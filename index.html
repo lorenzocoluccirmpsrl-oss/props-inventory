@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Props Inventory</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#FFFFFF;
+  --paper-dark:#E4E4E4;
+  --card:#F6F6F6;
+  --ink:#232323;
+  --ink-soft:#767676;
+  --teal:#2E6B60;
+  --teal-bg:#DCEAE4;
+  --amber:#B9822C;
+  --amber-bg:#F1E4C9;
+  --red:#A63A34;
+  --red-bg:#F1DCD8;
+  --gray:#7C7566;
+  --gray-bg:#E5DFCF;
+  --line: rgba(35,35,35,0.14);
+}
+*{box-sizing:border-box;}
+body{
+  margin:0;
+  background:var(--paper);
+  background-image:
+    radial-gradient(circle at 1px 1px, rgba(35,35,35,0.05) 1px, transparent 0);
+  background-size:22px 22px;
+  color:var(--ink);
+  font-family:'JetBrains Mono', monospace;
+  min-height:100vh;
+}
+.wrap{max-width:1180px;margin:0 auto;padding:28px 22px 80px;}
+
+/* HEADER */
+header{
+  display:flex;justify-content:space-between;align-items:flex-end;
+  border-bottom:4px solid var(--ink);
+  padding-bottom:16px;margin-bottom:22px;flex-wrap:wrap;gap:14px;
+}
+.title-block h1{
+  font-family:'Oswald',sans-serif;
+  font-weight:700;
+  font-size:38px;
+  letter-spacing:1.5px;
+  text-transform:uppercase;
+  margin:0;
+  line-height:1;
+}
+.title-block .sub{
+  font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(--ink-soft);margin-top:6px;
+}
+.stats{display:flex;gap:10px;flex-wrap:wrap;}
+.stat{
+  background:var(--card);
+  border:1.5px solid var(--ink);
+  padding:8px 14px;min-width:78px;text-align:center;
+}
+.stat .n{font-family:'Oswald',sans-serif;font-size:22px;font-weight:600;}
+.stat .l{font-size:9px;letter-spacing:1.5px;text-transform:uppercase;color:var(--ink-soft);}
+
+/* TOOLBAR */
+.toolbar{
+  display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:18px;
+}
+.toolbar input[type=text], .toolbar select{
+  font-family:'JetBrains Mono',monospace;
+  background:var(--card);
+  border:1.5px solid var(--ink);
+  padding:9px 10px;font-size:12.5px;color:var(--ink);
+}
+.toolbar input[type=text]{flex:1;min-width:180px;}
+.spacer{flex:1;}
+button{
+  font-family:'JetBrains Mono',monospace;
+  cursor:pointer;border:1.5px solid var(--ink);
+  background:var(--ink);color:var(--paper);
+  padding:10px 16px;font-size:12px;letter-spacing:1px;text-transform:uppercase;
+  font-weight:600;
+}
+button.secondary{background:transparent;color:var(--ink);}
+button.ghost{background:transparent;border:none;color:var(--ink-soft);text-transform:none;letter-spacing:0;padding:4px 6px;}
+button:hover{opacity:0.85;}
+
+/* FORM PANEL */
+.panel{
+  background:var(--card);border:2px solid var(--ink);
+  padding:20px;margin-bottom:26px;display:none;
+}
+.panel.open{display:block;}
+.panel h3{
+  font-family:'Oswald',sans-serif;text-transform:uppercase;letter-spacing:1px;
+  margin:0 0 14px;font-size:17px;border-bottom:2px dashed var(--line);padding-bottom:10px;
+}
+.form-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;}
+.form-grid .full{grid-column:1/-1;}
+.field label{display:block;font-size:10px;letter-spacing:1.2px;text-transform:uppercase;color:var(--ink-soft);margin-bottom:5px;}
+.field input, .field select{
+  width:100%;font-family:'JetBrains Mono',monospace;font-size:13px;
+  padding:9px 10px;border:1.5px solid var(--ink);background:#fff;color:var(--ink);
+}
+.photo-row{display:flex;gap:16px;align-items:flex-start;grid-column:1/-1;}
+.photo-drop{
+  width:120px;height:120px;border:2px dashed var(--ink);background:#fff;
+  display:flex;align-items:center;justify-content:center;flex-direction:column;
+  font-size:10px;text-align:center;color:var(--ink-soft);cursor:pointer;overflow:hidden;flex-shrink:0;
+}
+.photo-drop img{width:100%;height:100%;object-fit:cover;}
+.form-actions{display:flex;gap:10px;margin-top:16px;justify-content:flex-end;}
+
+/* GRID */
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:18px;}
+.tag-card{
+  position:relative;background:var(--card);border:1.5px solid var(--ink);
+  padding:14px 14px 12px;
+}
+.tag-card::before{
+  content:"";position:absolute;top:12px;left:12px;width:9px;height:9px;
+  border-radius:50%;background:var(--paper);border:1.5px solid var(--ink);
+}
+.tag-card .photo{
+  width:100%;height:130px;background:var(--paper-dark);border:1px solid var(--line);
+  margin-bottom:10px;display:flex;align-items:center;justify-content:center;overflow:hidden;
+}
+.tag-card .photo img{width:100%;height:100%;object-fit:cover;}
+.tag-card .photo .ph{font-size:10px;color:var(--ink-soft);letter-spacing:1px;text-transform:uppercase;}
+.tag-card h4{
+  font-family:'Oswald',sans-serif;font-size:16px;margin:0 0 6px;text-transform:uppercase;letter-spacing:0.5px;
+}
+.tag-card .row{display:flex;justify-content:space-between;font-size:11.5px;padding:3px 0;border-bottom:1px dotted var(--line);}
+.tag-card .row span:first-child{color:var(--ink-soft);letter-spacing:0.5px;text-transform:uppercase;font-size:10px;}
+.badge{
+  display:inline-block;font-size:10px;letter-spacing:1px;text-transform:uppercase;font-weight:700;
+  padding:4px 9px;margin-top:10px;transform:rotate(-1.5deg);border:1.5px solid currentColor;
+}
+.badge.AVAILABLE{color:var(--teal);background:var(--teal-bg);}
+.badge.MISSING{color:var(--red);background:var(--red-bg);}
+.card-actions{display:flex;justify-content:space-between;align-items:center;margin-top:10px;}
+
+.empty{
+  text-align:center;padding:60px 20px;color:var(--ink-soft);
+  border:2px dashed var(--ink);background:var(--card);
+}
+.empty b{display:block;font-family:'Oswald',sans-serif;font-size:18px;color:var(--ink);margin-bottom:6px;text-transform:uppercase;}
+
+.loading{padding:40px;text-align:center;color:var(--ink-soft);font-size:12px;letter-spacing:1px;text-transform:uppercase;}
+
+.tag-card .photo img{cursor:zoom-in;}
+
+.lightbox{
+  position:fixed;inset:0;background:rgba(20,17,12,0.88);
+  display:none;align-items:center;justify-content:center;
+  z-index:999;padding:40px;cursor:zoom-out;
+}
+.lightbox.open{display:flex;}
+.lightbox img{
+  max-width:100%;max-height:100%;
+  border:3px solid var(--paper);
+  box-shadow:0 10px 40px rgba(0,0,0,0.5);
+}
+.lightbox .lb-close{
+  position:absolute;top:20px;right:26px;
+  color:var(--paper);font-family:'Oswald',sans-serif;font-size:14px;
+  letter-spacing:1.5px;text-transform:uppercase;border:1.5px solid var(--paper);
+  padding:8px 14px;background:transparent;cursor:pointer;
+}
+
+@media (max-width:720px){
+  .form-grid{grid-template-columns:repeat(2,1fr);}
+  .title-block h1{font-size:28px;}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="title-block">
+      <h1>Props Inventory</h1>
+      <div class="sub">Warehouse &middot; Automated intake sheets</div>
+    </div>
+    <div class="stats" id="stats"></div>
+  </header>
+
+  <div class="toolbar">
+    <input type="text" id="search" placeholder="Search by TERRITORY, PRODUCT, ORDER, QUANTITY, SIZE, ACTIVITY, NOTE...">
+    <select id="filterTerritory"><option value="">TERRITORY</option></select>
+    <select id="filterAvailability">
+      <option value="">AVAILABILITY</option>
+      <option>AVAILABLE</option>
+      <option>MISSING</option>
+    </select>
+    <div class="spacer"></div>
+    <button class="secondary" id="btnLock" type="button">🔒 Unlock editing</button>
+    <button id="btnNew">+ New prop</button>
+  </div>
+
+  <div class="panel" id="panel">
+    <h3 id="panelTitle">New prop sheet</h3>
+    <div class="form-grid">
+      <div class="photo-row">
+        <div class="photo-drop" id="photoDrop">
+          <span id="photoPlaceholder">Upload<br>photo</span>
+        </div>
+        <input type="file" id="photoInput" accept="image/*" style="display:none">
+        <div style="font-size:11px;color:var(--ink-soft);max-width:280px;">
+          Click the box to upload a photo of the prop. The image is resized automatically.
+        </div>
+      </div>
+
+      <div class="field"><label>Territory</label><input type="text" id="f_territory" placeholder="e.g. IT-North"></div>
+      <div class="field"><label>Product</label><input type="text" id="f_prodotto" placeholder="e.g. Director chair"></div>
+      <div class="field"><label>Order</label><input type="text" id="f_ordine" placeholder="e.g. ORD-2026-014"></div>
+      <div class="field"><label>Quantity</label><input type="number" id="f_quantity" min="0" placeholder="0"></div>
+      <div class="field"><label>Size</label><input type="text" id="f_size" placeholder="e.g. M / 40x40cm"></div>
+      <div class="field">
+        <label>Availability</label>
+        <select id="f_availability">
+          <option>AVAILABLE</option>
+          <option>MISSING</option>
+        </select>
+      </div>
+      <div class="field full" id="noteField" style="display:none;">
+        <label>Note (reason) - e.g. shipping, repair, loan</label>
+        <input type="text" id="f_note" placeholder="e.g. Out for shipment to client XY">
+      </div>
+      <div class="field full"><label>Activity</label><input type="text" id="f_activity" placeholder="e.g. Milan photo shoot"></div>
+    </div>
+    <div class="form-actions">
+      <button class="secondary" id="btnCancel">Cancel</button>
+      <button id="btnSave">Save sheet</button>
+    </div>
+  </div>
+
+  <div id="content" class="loading">Loading inventory...</div>
+</div>
+
+<div class="lightbox" id="lightbox" onclick="closeLightbox()">
+  <button class="lb-close" onclick="closeLightbox()">Close ✕</button>
+  <img id="lightboxImg" src="" onclick="event.stopPropagation()">
+</div>
+
+<script>
+const EDIT_PIN = '2026';
+let unlocked = false;
+let items = [];
+let editingId = null;
+let currentPhoto = null;
+
+const el = id => document.getElementById(id);
+
+function updateLockButton(){
+  const btn = el('btnLock');
+  btn.textContent = unlocked ? '🔓 Editing unlocked' : '🔒 Unlock editing';
+}
+
+function checkAuth(){
+  if(unlocked) return true;
+  const pin = prompt('Enter PIN to edit the inventory:');
+  if(pin === null) return false;
+  if(pin === EDIT_PIN){
+    unlocked = true;
+    updateLockButton();
+    return true;
+  }
+  alert('Incorrect PIN.');
+  return false;
+}
+
+el('btnLock').addEventListener('click', ()=>{
+  if(unlocked){
+    unlocked = false;
+    updateLockButton();
+  }else{
+    checkAuth();
+  }
+});
+
+async function loadItems(){
+  try{
+    const res = await fetch('/api/inventory');
+    if(!res.ok) throw new Error('Network error');
+    const data = await res.json();
+    items = Array.isArray(data.items) ? data.items : [];
+  }catch(e){
+    items = [];
+    console.error(e);
+  }
+  let migrated = false;
+  items = items.map(it => {
+    if(it.availability === 'Disponibile'){ it.availability = 'AVAILABLE'; migrated = true; }
+    if(it.availability === 'Non disponibile' || it.availability === 'In uso' || it.availability === 'Esaurito'){ it.availability = 'MISSING'; migrated = true; }
+    return it;
+  });
+  if(migrated) saveItems();
+  render();
+}
+
+async function saveItems(){
+  try{
+    const res = await fetch('/api/inventory', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items })
+    });
+    if(!res.ok) throw new Error('Network error');
+  }catch(e){
+    alert('Error saving the data. Please try again.');
+    console.error(e);
+  }
+}
+
+function resizeImage(file){
+  return new Promise((resolve,reject)=>{
+    const reader = new FileReader();
+    reader.onload = e => {
+      const img = new Image();
+      img.onload = () => {
+        const maxW = 480;
+        const scale = Math.min(1, maxW / img.width);
+        const w = Math.round(img.width * scale);
+        const h = Math.round(img.height * scale);
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        canvas.getContext('2d').drawImage(img,0,0,w,h);
+        resolve(canvas.toDataURL('image/jpeg', 0.72));
+      };
+      img.onerror = reject;
+      img.src = e.target.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+el('photoDrop').addEventListener('click', ()=> el('photoInput').click());
+el('photoInput').addEventListener('change', async (e)=>{
+  const file = e.target.files[0];
+  if(!file) return;
+  try{
+    currentPhoto = await resizeImage(file);
+    el('photoDrop').innerHTML = `<img src="${currentPhoto}">`;
+  }catch(err){
+    alert('Could not read this image.');
+  }
+});
+
+function openPanel(item){
+  editingId = item ? item.id : null;
+  el('panelTitle').textContent = item ? 'Edit prop sheet' : 'New prop sheet';
+  currentPhoto = item ? item.photo : null;
+  el('photoDrop').innerHTML = currentPhoto ? `<img src="${currentPhoto}">` : '<span>Upload<br>photo</span>';
+  el('f_territory').value = item ? item.territory : '';
+  el('f_prodotto').value = item ? item.prodotto : '';
+  el('f_ordine').value = item ? item.ordine : '';
+  el('f_quantity').value = item ? item.quantity : '';
+  el('f_size').value = item ? item.size : '';
+  el('f_availability').value = item ? item.availability : 'AVAILABLE';
+  el('f_note').value = item ? (item.note || '') : '';
+  toggleNoteField();
+  el('f_activity').value = item ? item.activity : '';
+  el('panel').classList.add('open');
+  el('panel').scrollIntoView({behavior:'smooth', block:'start'});
+}
+
+function closePanel(){
+  el('panel').classList.remove('open');
+  editingId = null;
+  currentPhoto = null;
+}
+
+el('f_availability').addEventListener('change', toggleNoteField);
+function toggleNoteField(){
+  const isMissing = el('f_availability').value === 'MISSING';
+  el('noteField').style.display = isMissing ? 'block' : 'none';
+  if(!isMissing) el('f_note').value = '';
+}
+
+el('btnNew').addEventListener('click', ()=>{ if(checkAuth()) openPanel(null); });
+el('btnCancel').addEventListener('click', closePanel);
+
+el('btnSave').addEventListener('click', async ()=>{
+  const prodotto = el('f_prodotto').value.trim();
+  if(!prodotto){
+    alert('The Product field is required.');
+    return;
+  }
+  const availability = el('f_availability').value;
+  const note = el('f_note').value.trim();
+  if(availability === 'MISSING' && !note){
+    alert('Please add a note: the reason why the prop is MISSING (e.g. shipping, repair, loan).');
+    el('f_note').focus();
+    return;
+  }
+  const data = {
+    id: editingId || (Date.now().toString(36) + Math.random().toString(36).slice(2,7)),
+    photo: currentPhoto,
+    territory: el('f_territory').value.trim(),
+    prodotto,
+    ordine: el('f_ordine').value.trim(),
+    quantity: el('f_quantity').value === '' ? 0 : Number(el('f_quantity').value),
+    size: el('f_size').value.trim(),
+    availability,
+    note: availability === 'MISSING' ? note : '',
+    activity: el('f_activity').value.trim(),
+    updatedAt: new Date().toISOString()
+  };
+  if(editingId){
+    items = items.map(it => it.id === editingId ? data : it);
+  }else{
+    items.push(data);
+  }
+  await saveItems();
+  closePanel();
+  render();
+});
+
+function deleteItem(id){
+  if(!checkAuth()) return;
+  if(!confirm('Delete this prop sheet? This action cannot be undone.')) return;
+  items = items.filter(it => it.id !== id);
+  saveItems();
+  render();
+}
+window.deleteItem = deleteItem;
+window.editItem = (id) => { if(checkAuth()) openPanel(items.find(it=>it.id===id)); };
+
+function openLightbox(src){
+  el('lightboxImg').src = src;
+  el('lightbox').classList.add('open');
+}
+function closeLightbox(){
+  el('lightbox').classList.remove('open');
+  el('lightboxImg').src = '';
+}
+document.addEventListener('keydown', e => {
+  if(e.key === 'Escape') closeLightbox();
+});
+
+function badgeClass(av){
+  return av.replace(/\s+/g,'.');
+}
+
+function updateFilters(){
+  const territories = [...new Set(items.map(i=>i.territory).filter(Boolean))].sort();
+  const sel = el('filterTerritory');
+  const current = sel.value;
+  sel.innerHTML = '<option value="">TERRITORY</option>' + territories.map(t=>`<option${t===current?' selected':''}>${t}</option>`).join('');
+}
+
+function renderStats(){
+  const total = items.length;
+  const disp = items.filter(i=>i.availability==='AVAILABLE').length;
+  const nonDisp = items.filter(i=>i.availability==='MISSING').length;
+  el('stats').innerHTML = `
+    <div class="stat"><div class="n">${total}</div><div class="l">Items</div></div>
+    <div class="stat"><div class="n">${disp}</div><div class="l">Available</div></div>
+    <div class="stat"><div class="n">${nonDisp}</div><div class="l">Missing</div></div>
+  `;
+}
+
+function render(){
+  updateFilters();
+  renderStats();
+  const q = el('search').value.trim().toLowerCase();
+  const fTerritory = el('filterTerritory').value;
+  const fAvail = el('filterAvailability').value;
+
+  let filtered = items.filter(it => {
+    if(fTerritory && it.territory !== fTerritory) return false;
+    if(fAvail && it.availability !== fAvail) return false;
+    if(q){
+      const hay = [it.territory,it.prodotto,it.ordine,it.size,it.activity,it.note].join(' ').toLowerCase();
+      if(!hay.includes(q)) return false;
+    }
+    return true;
+  }).sort((a,b)=> (b.updatedAt||'').localeCompare(a.updatedAt||''));
+
+  const content = el('content');
+  content.classList.remove('loading');
+
+  if(items.length === 0){
+    content.innerHTML = `<div class="empty"><b>The warehouse is empty</b>Add the first prop sheet to start your inventory.</div>`;
+    return;
+  }
+  if(filtered.length === 0){
+    content.innerHTML = `<div class="empty"><b>No results</b>No sheet matches the current filters.</div>`;
+    return;
+  }
+
+  content.innerHTML = `<div class="grid">` + filtered.map(it => `
+    <div class="tag-card">
+      <div class="photo">
+        ${it.photo ? `<img src="${it.photo}" onclick="openLightbox('${it.photo}')">` : `<span class="ph">Nessuna foto</span>`}
+      </div>
+      <h4>${escapeHtml(it.prodotto)}</h4>
+      <div class="row"><span>Territory</span><span>${escapeHtml(it.territory)||'—'}</span></div>
+      <div class="row"><span>Order</span><span>${escapeHtml(it.ordine)||'—'}</span></div>
+      <div class="row"><span>Quantity</span><span>${it.quantity ?? '—'}</span></div>
+      <div class="row"><span>Size</span><span>${escapeHtml(it.size)||'—'}</span></div>
+      <div class="row"><span>Activity</span><span>${escapeHtml(it.activity)||'—'}</span></div>
+      ${it.availability === 'MISSING' && it.note ? `<div class="row" style="border-bottom:none;"><span>Note</span><span style="color:var(--red);text-align:right;max-width:60%;">${escapeHtml(it.note)}</span></div>` : ''}
+      <span class="badge ${badgeClass(it.availability)}">${it.availability}</span>
+      <div class="card-actions">
+        <button class="ghost" onclick="editItem('${it.id}')">Edit</button>
+        <button class="ghost" onclick="deleteItem('${it.id}')">Delete</button>
+      </div>
+    </div>
+  `).join('') + `</div>`;
+}
+
+function escapeHtml(s){
+  if(s===undefined || s===null) return '';
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+el('search').addEventListener('input', render);
+el('filterTerritory').addEventListener('change', render);
+el('filterAvailability').addEventListener('change', render);
+
+updateLockButton();
+loadItems();
+</script>
+</body>
+</html>
