@@ -157,6 +157,11 @@ button:hover{opacity:0.85;}
 .h-status.AVAILABLE{color:var(--teal);background:var(--teal-bg);}
 .h-status.MISSING{color:var(--red);background:var(--red-bg);}
 .h-note{color:var(--ink);flex:1;min-width:100%;font-style:italic;}
+.h-del{
+  background:transparent;border:none;color:var(--ink-soft);cursor:pointer;
+  font-size:11px;padding:0 2px;margin-left:auto;text-transform:none;letter-spacing:0;
+}
+.h-del:hover{color:var(--red);}
 
 .empty{
   text-align:center;padding:60px 20px;color:var(--ink-soft);
@@ -338,7 +343,7 @@ button:hover{opacity:0.85;}
       <option>MISSING</option>
     </select>
     <input type="text" id="h_note" placeholder="Note (e.g. shipped to client XY)">
-    <div class="err" id="h_err">Please add a note for a MISSING entry.</div>
+    <div class="err" id="h_err"></div>
     <div class="actions">
       <button class="secondary" id="hCancel">Cancel</button>
       <button id="hSave">Add entry</button>
@@ -628,14 +633,20 @@ window.addHistoryEntry = addHistoryEntry;
 
 el('hCancel').addEventListener('click', ()=> el('historyOverlay').classList.remove('open'));
 el('hSave').addEventListener('click', async ()=>{
-  const availability = el('h_availability').value;
-  const note = el('h_note').value.trim();
-  if(availability === 'MISSING' && !note){
+  const dateVal = el('h_date').value;
+  if(!dateVal){
+    el('h_err').textContent = 'Please select a date using the calendar field above.';
     el('h_err').style.display = 'block';
     return;
   }
-  const dateVal = el('h_date').value;
-  const iso = dateVal ? new Date(dateVal + 'T12:00:00').toISOString() : new Date().toISOString();
+  const availability = el('h_availability').value;
+  const note = el('h_note').value.trim();
+  if(availability === 'MISSING' && !note){
+    el('h_err').textContent = 'Please add a note for a MISSING entry.';
+    el('h_err').style.display = 'block';
+    return;
+  }
+  const iso = new Date(dateVal + 'T12:00:00').toISOString();
   items = items.map(it => {
     if(it.id !== pendingHistoryItemId) return it;
     const history = Array.isArray(it.history) ? it.history.slice() : [];
@@ -645,6 +656,7 @@ el('hSave').addEventListener('click', async ()=>{
   el('historyOverlay').classList.remove('open');
   await saveItems({});
   render();
+  showToast('History entry added.');
 });
 
 async function openLightbox(itemId, evt){
@@ -757,12 +769,14 @@ function formatDate(iso){
 function renderHistory(it){
   const history = Array.isArray(it.history) ? it.history : [];
   if(history.length === 0) return '';
-  const sorted = history.slice().sort((a,b) => (b.date||'').localeCompare(a.date||''));
+  const indexed = history.map((h, idx) => Object.assign({}, h, { __idx: idx }));
+  const sorted = indexed.slice().sort((a,b) => (b.date||'').localeCompare(a.date||''));
   const rows = sorted.map(h => `
     <li>
       <span class="h-date">${formatDate(h.date)}</span>
       <span class="h-status ${badgeClass(h.availability)}">${h.availability}</span>
       ${h.note ? `<span class="h-note">${escapeHtml(h.note)}</span>` : ''}
+      <button class="ghost h-del" onclick="deleteHistoryEntry('${it.id}', ${h.__idx})" title="Delete this entry">✕</button>
     </li>
   `).join('');
   return `
@@ -772,6 +786,20 @@ function renderHistory(it){
     </details>
   `;
 }
+
+window.deleteHistoryEntry = async (itemId, idx) => {
+  if(!(await requireOwnerAuth())) return;
+  if(!(await askConfirm('Delete this history entry? This action cannot be undone.', 'Delete'))) return;
+  items = items.map(it => {
+    if(it.id !== itemId) return it;
+    const history = Array.isArray(it.history) ? it.history.slice() : [];
+    history.splice(idx, 1);
+    return Object.assign({}, it, { history });
+  });
+  await saveItems({});
+  render();
+  showToast('History entry deleted.');
+};
 
 function escapeHtml(s){
   if(s===undefined || s===null) return '';
