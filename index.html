@@ -178,7 +178,9 @@ button:hover{opacity:0.85;}
   max-width:100%;max-height:100%;
   border:3px solid var(--paper);
   box-shadow:0 10px 40px rgba(0,0,0,0.5);
+  transition:opacity 0.15s ease;
 }
+.lightbox.loading-hq img{opacity:0.6;}
 .lightbox .lb-close{
   position:absolute;top:20px;right:26px;
   color:var(--paper);font-family:'Oswald',sans-serif;font-size:14px;
@@ -197,7 +199,7 @@ button:hover{opacity:0.85;}
 }
 .dialog h4{margin:0 0 12px;font-family:'Oswald',sans-serif;text-transform:uppercase;letter-spacing:1px;font-size:16px;}
 .dialog p{font-size:12.5px;color:var(--ink-soft);margin:0 0 14px;line-height:1.5;}
-.dialog input{
+.dialog input, .dialog select{
   width:100%;font-family:'JetBrains Mono',monospace;font-size:14px;
   padding:10px;border:1.5px solid var(--ink);background:#fff;color:var(--ink);margin-bottom:10px;
 }
@@ -313,14 +315,49 @@ button:hover{opacity:0.85;}
   </div>
 </div>
 
+<div class="overlay" id="ownerOverlay">
+  <div class="dialog">
+    <h4>Restricted access</h4>
+    <p>Adding a past history entry requires the owner password.</p>
+    <input type="password" id="ownerPinInput" placeholder="Password">
+    <div class="err" id="ownerPinErr">Incorrect password.</div>
+    <div class="actions">
+      <button class="secondary" id="ownerPinCancel">Cancel</button>
+      <button id="ownerPinSubmit">Unlock</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="historyOverlay">
+  <div class="dialog">
+    <h4>Add past history entry</h4>
+    <p>Use this to record a status change that happened before history tracking was added (e.g. a past shipment).</p>
+    <input type="date" id="h_date">
+    <select id="h_availability">
+      <option>AVAILABLE</option>
+      <option>MISSING</option>
+    </select>
+    <input type="text" id="h_note" placeholder="Note (e.g. shipped to client XY)">
+    <div class="err" id="h_err">Please add a note for a MISSING entry.</div>
+    <div class="actions">
+      <button class="secondary" id="hCancel">Cancel</button>
+      <button id="hSave">Add entry</button>
+    </div>
+  </div>
+</div>
+
 <div class="toast-wrap" id="toastWrap"></div>
 
 <script>
 const EDIT_PIN = '2026';
+const OWNER_PASSWORD = 'lorenzo';
 let unlocked = false;
+let ownerUnlocked = false;
 let items = [];
 let editingId = null;
 let currentPhoto = null;
+let currentPhotoFull = null;
+let photoChanged = false;
 
 const el = id => document.getElementById(id);
 
@@ -377,6 +414,31 @@ function closeConfirmDialog(result){
 el('confirmOk').addEventListener('click', ()=> closeConfirmDialog(true));
 el('confirmCancel').addEventListener('click', ()=> closeConfirmDialog(false));
 
+let pendingOwnerAuthResolve = null;
+function requireOwnerAuth(){
+  if(ownerUnlocked) return Promise.resolve(true);
+  el('ownerPinInput').value = '';
+  el('ownerPinErr').style.display = 'none';
+  el('ownerOverlay').classList.add('open');
+  setTimeout(()=> el('ownerPinInput').focus(), 50);
+  return new Promise((resolve) => { pendingOwnerAuthResolve = resolve; });
+}
+function closeOwnerDialog(result){
+  el('ownerOverlay').classList.remove('open');
+  if(pendingOwnerAuthResolve){ pendingOwnerAuthResolve(result); pendingOwnerAuthResolve = null; }
+}
+el('ownerPinSubmit').addEventListener('click', ()=>{
+  const pwd = el('ownerPinInput').value;
+  if(pwd === OWNER_PASSWORD){
+    ownerUnlocked = true;
+    closeOwnerDialog(true);
+  }else{
+    el('ownerPinErr').style.display = 'block';
+  }
+});
+el('ownerPinCancel').addEventListener('click', ()=> closeOwnerDialog(false));
+el('ownerPinInput').addEventListener('keydown', (e)=>{ if(e.key === 'Enter') el('ownerPinSubmit').click(); });
+
 el('btnLock').addEventListener('click', async ()=>{
   if(unlocked){
     unlocked = false;
@@ -406,12 +468,12 @@ async function loadItems(){
   render();
 }
 
-async function saveItems(){
+async function saveItems(photoUpdates){
   try{
     const res = await fetch('/api/inventory', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ items })
+      body: JSON.stringify({ items, photoUpdates: photoUpdates || {} })
     });
     if(!res.ok) throw new Error('Network error');
   }catch(e){
@@ -420,20 +482,19 @@ async function saveItems(){
   }
 }
 
-function resizeImage(file){
+function resizeImage(file, maxW, quality){
   return new Promise((resolve,reject)=>{
     const reader = new FileReader();
     reader.onload = e => {
       const img = new Image();
       img.onload = () => {
-        const maxW = 480;
         const scale = Math.min(1, maxW / img.width);
         const w = Math.round(img.width * scale);
         const h = Math.round(img.height * scale);
         const canvas = document.createElement('canvas');
         canvas.width = w; canvas.height = h;
         canvas.getContext('2d').drawImage(img,0,0,w,h);
-        resolve(canvas.toDataURL('image/jpeg', 0.72));
+        resolve(canvas.toDataURL('image/jpeg', quality));
       };
       img.onerror = reject;
       img.src = e.target.result;
@@ -448,7 +509,9 @@ el('photoInput').addEventListener('change', async (e)=>{
   const file = e.target.files[0];
   if(!file) return;
   try{
-    currentPhoto = await resizeImage(file);
+    currentPhoto = await resizeImage(file, 480, 0.72);
+    currentPhotoFull = await resizeImage(file, 1400, 0.85);
+    photoChanged = true;
     el('photoDrop').innerHTML = `<img src="${currentPhoto}">`;
   }catch(err){
     showToast('Could not read this image.', 'error');
@@ -459,6 +522,8 @@ function openPanel(item){
   editingId = item ? item.id : null;
   el('panelTitle').textContent = item ? 'Edit prop sheet' : 'New prop sheet';
   currentPhoto = item ? item.photo : null;
+  currentPhotoFull = null;
+  photoChanged = false;
   el('photoDrop').innerHTML = currentPhoto ? `<img src="${currentPhoto}">` : '<span>Upload<br>photo</span>';
   el('f_territory').value = item ? item.territory : '';
   el('f_prodotto').value = item ? item.prodotto : '';
@@ -477,6 +542,8 @@ function closePanel(){
   el('panel').classList.remove('open');
   editingId = null;
   currentPhoto = null;
+  currentPhotoFull = null;
+  photoChanged = false;
 }
 
 el('f_availability').addEventListener('change', toggleNoteField);
@@ -531,7 +598,8 @@ el('btnSave').addEventListener('click', async ()=>{
   }else{
     items.push(data);
   }
-  await saveItems();
+  const photoUpdates = photoChanged ? { [data.id]: currentPhotoFull || null } : {};
+  await saveItems(photoUpdates);
   closePanel();
   render();
 });
@@ -540,15 +608,62 @@ async function deleteItem(id){
   if(!(await requireAuth())) return;
   if(!(await askConfirm('Delete this prop sheet? This action cannot be undone.', 'Delete'))) return;
   items = items.filter(it => it.id !== id);
-  saveItems();
+  await saveItems({ [id]: null });
   render();
 }
 window.deleteItem = deleteItem;
 window.editItem = async (id) => { if(await requireAuth()) openPanel(items.find(it=>it.id===id)); };
 
-function openLightbox(src){
-  el('lightboxImg').src = src;
+let pendingHistoryItemId = null;
+async function addHistoryEntry(itemId){
+  if(!(await requireOwnerAuth())) return;
+  pendingHistoryItemId = itemId;
+  el('h_date').value = new Date().toISOString().slice(0,10);
+  el('h_availability').value = 'AVAILABLE';
+  el('h_note').value = '';
+  el('h_err').style.display = 'none';
+  el('historyOverlay').classList.add('open');
+}
+window.addHistoryEntry = addHistoryEntry;
+
+el('hCancel').addEventListener('click', ()=> el('historyOverlay').classList.remove('open'));
+el('hSave').addEventListener('click', async ()=>{
+  const availability = el('h_availability').value;
+  const note = el('h_note').value.trim();
+  if(availability === 'MISSING' && !note){
+    el('h_err').style.display = 'block';
+    return;
+  }
+  const dateVal = el('h_date').value;
+  const iso = dateVal ? new Date(dateVal + 'T12:00:00').toISOString() : new Date().toISOString();
+  items = items.map(it => {
+    if(it.id !== pendingHistoryItemId) return it;
+    const history = Array.isArray(it.history) ? it.history.slice() : [];
+    history.push({ date: iso, availability, note: availability === 'MISSING' ? note : '' });
+    return { ...it, history };
+  });
+  el('historyOverlay').classList.remove('open');
+  await saveItems({});
+  render();
+});
+
+async function openLightbox(itemId, evt){
+  const thumbSrc = evt && evt.target ? evt.target.src : '';
+  el('lightboxImg').src = thumbSrc;
   el('lightbox').classList.add('open');
+  el('lightbox').classList.add('loading-hq');
+  try{
+    const res = await fetch('/api/inventory?photo=' + encodeURIComponent(itemId));
+    if(res.ok){
+      const data = await res.json();
+      if(data.photo){
+        el('lightboxImg').src = data.photo;
+      }
+    }
+  }catch(e){
+    console.error(e);
+  }
+  el('lightbox').classList.remove('loading-hq');
 }
 function closeLightbox(){
   el('lightbox').classList.remove('open');
@@ -612,7 +727,7 @@ function render(){
   content.innerHTML = `<div class="grid">` + filtered.map(it => `
     <div class="tag-card">
       <div class="photo">
-        ${it.photo ? `<img src="${it.photo}" onclick="openLightbox('${it.photo}')">` : `<span class="ph">Nessuna foto</span>`}
+        ${it.photo ? `<img src="${it.photo}" onclick="openLightbox('${it.id}', event)">` : `<span class="ph">Nessuna foto</span>`}
       </div>
       <h4>${escapeHtml(it.prodotto)}</h4>
       <div class="row"><span>Territory</span><span>${escapeHtml(it.territory)||'—'}</span></div>
@@ -625,6 +740,7 @@ function render(){
       ${renderHistory(it)}
       <div class="card-actions">
         <button class="ghost" onclick="editItem('${it.id}')">Edit</button>
+        <button class="ghost" onclick="addHistoryEntry('${it.id}')">+ History</button>
         <button class="ghost" onclick="deleteItem('${it.id}')">Delete</button>
       </div>
     </div>
