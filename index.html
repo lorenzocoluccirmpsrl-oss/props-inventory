@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <title>Props Inventory</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
@@ -140,6 +141,23 @@ button:hover{opacity:0.85;}
 .badge.MISSING{color:var(--red);background:var(--red-bg);}
 .card-actions{display:flex;justify-content:space-between;align-items:center;margin-top:10px;}
 
+.history{margin-top:10px;border-top:1px dotted var(--line);padding-top:8px;}
+.history summary{
+  cursor:pointer;font-size:10px;letter-spacing:1px;text-transform:uppercase;color:var(--ink-soft);
+  list-style:none;
+}
+.history summary::-webkit-details-marker{display:none;}
+.history summary::before{content:"▸ ";}
+.history[open] summary::before{content:"▾ ";}
+.history ul{list-style:none;margin:8px 0 0;padding:0;display:flex;flex-direction:column;gap:6px;}
+.history li{font-size:10.5px;display:flex;flex-wrap:wrap;gap:6px;align-items:center;border-bottom:1px dotted var(--line);padding-bottom:6px;}
+.history li:last-child{border-bottom:none;padding-bottom:0;}
+.h-date{color:var(--ink-soft);font-family:'JetBrains Mono',monospace;min-width:100px;}
+.h-status{font-weight:700;letter-spacing:0.5px;padding:1px 6px;font-size:9px;text-transform:uppercase;}
+.h-status.AVAILABLE{color:var(--teal);background:var(--teal-bg);}
+.h-status.MISSING{color:var(--red);background:var(--red-bg);}
+.h-note{color:var(--ink);flex:1;min-width:100%;font-style:italic;}
+
 .empty{
   text-align:center;padding:60px 20px;color:var(--ink-soft);
   border:2px dashed var(--ink);background:var(--card);
@@ -168,6 +186,33 @@ button:hover{opacity:0.85;}
   padding:8px 14px;background:transparent;cursor:pointer;
 }
 
+/* IN-PAGE DIALOGS (replace native prompt/confirm/alert, which browsers can silently suppress) */
+.overlay{
+  position:fixed;inset:0;background:rgba(20,17,12,0.55);
+  display:none;align-items:center;justify-content:center;z-index:1000;padding:20px;
+}
+.overlay.open{display:flex;}
+.dialog{
+  background:var(--card);border:2px solid var(--ink);padding:24px;max-width:360px;width:100%;
+}
+.dialog h4{margin:0 0 12px;font-family:'Oswald',sans-serif;text-transform:uppercase;letter-spacing:1px;font-size:16px;}
+.dialog p{font-size:12.5px;color:var(--ink-soft);margin:0 0 14px;line-height:1.5;}
+.dialog input{
+  width:100%;font-family:'JetBrains Mono',monospace;font-size:14px;
+  padding:10px;border:1.5px solid var(--ink);background:#fff;color:var(--ink);margin-bottom:10px;
+}
+.dialog .err{color:var(--red);font-size:11.5px;margin:-4px 0 10px;display:none;}
+.dialog .actions{display:flex;gap:10px;justify-content:flex-end;}
+
+.toast-wrap{
+  position:fixed;top:20px;right:20px;z-index:1100;display:flex;flex-direction:column;gap:10px;max-width:320px;
+}
+.toast{
+  background:var(--ink);color:var(--paper);border:1.5px solid var(--ink);padding:12px 16px;font-size:12px;
+  box-shadow:0 4px 14px rgba(0,0,0,0.25);
+}
+.toast.error{background:var(--red);border-color:var(--red);}
+
 @media (max-width:720px){
   .form-grid{grid-template-columns:repeat(2,1fr);}
   .title-block h1{font-size:28px;}
@@ -194,6 +239,7 @@ button:hover{opacity:0.85;}
       <option>MISSING</option>
     </select>
     <div class="spacer"></div>
+    <button class="secondary" id="btnExport" type="button">⬇ Export XLS</button>
     <button class="secondary" id="btnLock" type="button">🔒 Unlock editing</button>
     <button id="btnNew">+ New prop</button>
   </div>
@@ -243,6 +289,32 @@ button:hover{opacity:0.85;}
   <img id="lightboxImg" src="" onclick="event.stopPropagation()">
 </div>
 
+<div class="overlay" id="pinOverlay">
+  <div class="dialog">
+    <h4>Enter PIN</h4>
+    <p>Enter the PIN to unlock editing.</p>
+    <input type="password" id="pinInput" inputmode="numeric" placeholder="PIN">
+    <div class="err" id="pinErr">Incorrect PIN.</div>
+    <div class="actions">
+      <button class="secondary" id="pinCancel">Cancel</button>
+      <button id="pinSubmit">Unlock</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="confirmOverlay">
+  <div class="dialog">
+    <h4>Please confirm</h4>
+    <p id="confirmMessage">Are you sure?</p>
+    <div class="actions">
+      <button class="secondary" id="confirmCancel">Cancel</button>
+      <button id="confirmOk">Delete</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast-wrap" id="toastWrap"></div>
+
 <script>
 const EDIT_PIN = '2026';
 let unlocked = false;
@@ -257,25 +329,60 @@ function updateLockButton(){
   btn.textContent = unlocked ? '🔓 Editing unlocked' : '🔒 Unlock editing';
 }
 
-function checkAuth(){
-  if(unlocked) return true;
-  const pin = prompt('Enter PIN to edit the inventory:');
-  if(pin === null) return false;
+function showToast(message, type){
+  const t = document.createElement('div');
+  t.className = 'toast' + (type === 'error' ? ' error' : '');
+  t.textContent = message;
+  el('toastWrap').appendChild(t);
+  setTimeout(()=>{ t.remove(); }, 4500);
+}
+
+let pendingAuthResolve = null;
+function requireAuth(){
+  if(unlocked) return Promise.resolve(true);
+  el('pinInput').value = '';
+  el('pinErr').style.display = 'none';
+  el('pinOverlay').classList.add('open');
+  setTimeout(()=> el('pinInput').focus(), 50);
+  return new Promise((resolve) => { pendingAuthResolve = resolve; });
+}
+function closePinDialog(result){
+  el('pinOverlay').classList.remove('open');
+  if(pendingAuthResolve){ pendingAuthResolve(result); pendingAuthResolve = null; }
+}
+el('pinSubmit').addEventListener('click', ()=>{
+  const pin = el('pinInput').value;
   if(pin === EDIT_PIN){
     unlocked = true;
     updateLockButton();
-    return true;
+    closePinDialog(true);
+  }else{
+    el('pinErr').style.display = 'block';
   }
-  alert('Incorrect PIN.');
-  return false;
-}
+});
+el('pinCancel').addEventListener('click', ()=> closePinDialog(false));
+el('pinInput').addEventListener('keydown', (e)=>{ if(e.key === 'Enter') el('pinSubmit').click(); });
 
-el('btnLock').addEventListener('click', ()=>{
+let pendingConfirmResolve = null;
+function askConfirm(message, okLabel){
+  el('confirmMessage').textContent = message;
+  el('confirmOk').textContent = okLabel || 'Confirm';
+  el('confirmOverlay').classList.add('open');
+  return new Promise((resolve) => { pendingConfirmResolve = resolve; });
+}
+function closeConfirmDialog(result){
+  el('confirmOverlay').classList.remove('open');
+  if(pendingConfirmResolve){ pendingConfirmResolve(result); pendingConfirmResolve = null; }
+}
+el('confirmOk').addEventListener('click', ()=> closeConfirmDialog(true));
+el('confirmCancel').addEventListener('click', ()=> closeConfirmDialog(false));
+
+el('btnLock').addEventListener('click', async ()=>{
   if(unlocked){
     unlocked = false;
     updateLockButton();
   }else{
-    checkAuth();
+    await requireAuth();
   }
 });
 
@@ -308,7 +415,7 @@ async function saveItems(){
     });
     if(!res.ok) throw new Error('Network error');
   }catch(e){
-    alert('Error saving the data. Please try again.');
+    showToast('Error saving the data. Please try again.', 'error');
     console.error(e);
   }
 }
@@ -344,7 +451,7 @@ el('photoInput').addEventListener('change', async (e)=>{
     currentPhoto = await resizeImage(file);
     el('photoDrop').innerHTML = `<img src="${currentPhoto}">`;
   }catch(err){
-    alert('Could not read this image.');
+    showToast('Could not read this image.', 'error');
   }
 });
 
@@ -379,21 +486,31 @@ function toggleNoteField(){
   if(!isMissing) el('f_note').value = '';
 }
 
-el('btnNew').addEventListener('click', ()=>{ if(checkAuth()) openPanel(null); });
+el('btnNew').addEventListener('click', async ()=>{ if(await requireAuth()) openPanel(null); });
 el('btnCancel').addEventListener('click', closePanel);
 
 el('btnSave').addEventListener('click', async ()=>{
   const prodotto = el('f_prodotto').value.trim();
   if(!prodotto){
-    alert('The Product field is required.');
+    showToast('The Product field is required.', 'error');
     return;
   }
   const availability = el('f_availability').value;
   const note = el('f_note').value.trim();
   if(availability === 'MISSING' && !note){
-    alert('Please add a note: the reason why the prop is MISSING (e.g. shipping, repair, loan).');
+    showToast('Please add a note: the reason why the prop is MISSING (e.g. shipping, repair, loan).', 'error');
     el('f_note').focus();
     return;
+  }
+  const existing = editingId ? items.find(it => it.id === editingId) : null;
+  const history = existing && Array.isArray(existing.history) ? existing.history.slice() : [];
+  const statusChanged = !existing || existing.availability !== availability || (availability === 'MISSING' && existing.note !== note);
+  if(statusChanged){
+    history.push({
+      date: new Date().toISOString(),
+      availability,
+      note: availability === 'MISSING' ? note : ''
+    });
   }
   const data = {
     id: editingId || (Date.now().toString(36) + Math.random().toString(36).slice(2,7)),
@@ -406,6 +523,7 @@ el('btnSave').addEventListener('click', async ()=>{
     availability,
     note: availability === 'MISSING' ? note : '',
     activity: el('f_activity').value.trim(),
+    history,
     updatedAt: new Date().toISOString()
   };
   if(editingId){
@@ -418,15 +536,15 @@ el('btnSave').addEventListener('click', async ()=>{
   render();
 });
 
-function deleteItem(id){
-  if(!checkAuth()) return;
-  if(!confirm('Delete this prop sheet? This action cannot be undone.')) return;
+async function deleteItem(id){
+  if(!(await requireAuth())) return;
+  if(!(await askConfirm('Delete this prop sheet? This action cannot be undone.', 'Delete'))) return;
   items = items.filter(it => it.id !== id);
   saveItems();
   render();
 }
 window.deleteItem = deleteItem;
-window.editItem = (id) => { if(checkAuth()) openPanel(items.find(it=>it.id===id)); };
+window.editItem = async (id) => { if(await requireAuth()) openPanel(items.find(it=>it.id===id)); };
 
 function openLightbox(src){
   el('lightboxImg').src = src;
@@ -504,12 +622,39 @@ function render(){
       <div class="row"><span>Activity</span><span>${escapeHtml(it.activity)||'—'}</span></div>
       ${it.availability === 'MISSING' && it.note ? `<div class="row" style="border-bottom:none;"><span>Note</span><span style="color:var(--red);text-align:right;max-width:60%;">${escapeHtml(it.note)}</span></div>` : ''}
       <span class="badge ${badgeClass(it.availability)}">${it.availability}</span>
+      ${renderHistory(it)}
       <div class="card-actions">
         <button class="ghost" onclick="editItem('${it.id}')">Edit</button>
         <button class="ghost" onclick="deleteItem('${it.id}')">Delete</button>
       </div>
     </div>
   `).join('') + `</div>`;
+}
+
+function formatDate(iso){
+  try{
+    const d = new Date(iso);
+    return d.toLocaleDateString('en-GB') + ' ' + d.toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'});
+  }catch(e){ return iso; }
+}
+
+function renderHistory(it){
+  const history = Array.isArray(it.history) ? it.history : [];
+  if(history.length === 0) return '';
+  const sorted = history.slice().sort((a,b) => (b.date||'').localeCompare(a.date||''));
+  const rows = sorted.map(h => `
+    <li>
+      <span class="h-date">${formatDate(h.date)}</span>
+      <span class="h-status ${badgeClass(h.availability)}">${h.availability}</span>
+      ${h.note ? `<span class="h-note">${escapeHtml(h.note)}</span>` : ''}
+    </li>
+  `).join('');
+  return `
+    <details class="history">
+      <summary>History (${history.length})</summary>
+      <ul>${rows}</ul>
+    </details>
+  `;
 }
 
 function escapeHtml(s){
@@ -520,6 +665,45 @@ function escapeHtml(s){
 el('search').addEventListener('input', render);
 el('filterTerritory').addEventListener('change', render);
 el('filterAvailability').addEventListener('change', render);
+
+function historyToText(history){
+  if(!Array.isArray(history) || history.length === 0) return '';
+  return history
+    .slice()
+    .sort((a,b) => (a.date||'').localeCompare(b.date||''))
+    .map(h => `${formatDate(h.date)} - ${h.availability}${h.note ? ' (' + h.note + ')' : ''}`)
+    .join(' | ');
+}
+
+function exportXLSX(){
+  const headers = ['Territory','Product','Order','Quantity','Size','Availability','Activity','Note','History'];
+  const rows = items.map(it => [
+    it.territory || '', it.prodotto || '', it.ordine || '', it.quantity ?? '', it.size || '',
+    it.availability || '', it.activity || '', it.note || '', historyToText(it.history)
+  ]);
+  const wsData = [headers, ...rows];
+  const ws = XLSX.utils.aoa_to_sheet(wsData);
+  ws['!cols'] = [
+    { wch: 14 }, { wch: 26 }, { wch: 14 }, { wch: 10 }, { wch: 10 },
+    { wch: 14 }, { wch: 20 }, { wch: 24 }, { wch: 50 }
+  ];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Inventory');
+  const stamp = new Date().toISOString().slice(0,10);
+  XLSX.writeFile(wb, `props-inventory-${stamp}.xlsx`);
+}
+
+el('btnExport').addEventListener('click', ()=>{
+  if(items.length === 0){
+    showToast('There is nothing to export yet.', 'error');
+    return;
+  }
+  if(typeof XLSX === 'undefined'){
+    showToast('Export library failed to load. Check your connection and try again.', 'error');
+    return;
+  }
+  exportXLSX();
+});
 
 updateLockButton();
 loadItems();
