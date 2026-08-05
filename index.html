@@ -463,22 +463,40 @@ async function loadItems(){
     items = [];
     console.error(e);
   }
-  let migrated = false;
+  let migratedItems = [];
   items = items.map(it => {
-    if(it.availability === 'Disponibile'){ it.availability = 'AVAILABLE'; migrated = true; }
-    if(it.availability === 'Non disponibile' || it.availability === 'In uso' || it.availability === 'Esaurito'){ it.availability = 'MISSING'; migrated = true; }
+    let changed = false;
+    if(it.availability === 'Disponibile'){ it.availability = 'AVAILABLE'; changed = true; }
+    if(it.availability === 'Non disponibile' || it.availability === 'In uso' || it.availability === 'Esaurito'){ it.availability = 'MISSING'; changed = true; }
+    if(changed) migratedItems.push(it);
     return it;
   });
-  if(migrated) saveItems();
+  for(const it of migratedItems){
+    await saveItem(it, {});
+  }
   render();
 }
 
-async function saveItems(photoUpdates){
+async function saveItem(itemData, photoUpdates){
   try{
     const res = await fetch('/api/inventory', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ items, photoUpdates: photoUpdates || {} })
+      body: JSON.stringify({ upsertItem: itemData, photoUpdates: photoUpdates || {} })
+    });
+    if(!res.ok) throw new Error('Network error');
+  }catch(e){
+    showToast('Error saving the data. Please try again.', 'error');
+    console.error(e);
+  }
+}
+
+async function deleteItemRemote(id, photoUpdates){
+  try{
+    const res = await fetch('/api/inventory', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ deleteItemId: id, photoUpdates: photoUpdates || {} })
     });
     if(!res.ok) throw new Error('Network error');
   }catch(e){
@@ -604,7 +622,7 @@ el('btnSave').addEventListener('click', async ()=>{
     items.push(data);
   }
   const photoUpdates = photoChanged ? { [data.id]: currentPhotoFull || null } : {};
-  await saveItems(photoUpdates);
+  await saveItem(data, photoUpdates);
   closePanel();
   render();
 });
@@ -613,7 +631,7 @@ async function deleteItem(id){
   if(!(await requireAuth())) return;
   if(!(await askConfirm('Delete this prop sheet? This action cannot be undone.', 'Delete'))) return;
   items = items.filter(it => it.id !== id);
-  await saveItems({ [id]: null });
+  await deleteItemRemote(id, { [id]: null });
   render();
 }
 window.deleteItem = deleteItem;
@@ -647,14 +665,16 @@ el('hSave').addEventListener('click', async ()=>{
     return;
   }
   const iso = new Date(dateVal + 'T12:00:00').toISOString();
+  let updatedItem = null;
   items = items.map(it => {
     if(it.id !== pendingHistoryItemId) return it;
     const history = Array.isArray(it.history) ? it.history.slice() : [];
     history.push({ date: iso, availability, note: availability === 'MISSING' ? note : '' });
-    return { ...it, history };
+    updatedItem = { ...it, history };
+    return updatedItem;
   });
   el('historyOverlay').classList.remove('open');
-  await saveItems({});
+  if(updatedItem) await saveItem(updatedItem, {});
   render();
   showToast('History entry added.');
 });
@@ -790,13 +810,15 @@ function renderHistory(it){
 window.deleteHistoryEntry = async (itemId, idx) => {
   if(!(await requireOwnerAuth())) return;
   if(!(await askConfirm('Delete this history entry? This action cannot be undone.', 'Delete'))) return;
+  let updatedItem = null;
   items = items.map(it => {
     if(it.id !== itemId) return it;
     const history = Array.isArray(it.history) ? it.history.slice() : [];
     history.splice(idx, 1);
-    return Object.assign({}, it, { history });
+    updatedItem = Object.assign({}, it, { history });
+    return updatedItem;
   });
-  await saveItems({});
+  if(updatedItem) await saveItem(updatedItem, {});
   render();
   showToast('History entry deleted.');
 };
