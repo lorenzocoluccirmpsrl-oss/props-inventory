@@ -1,5 +1,25 @@
 import { getStore } from '@netlify/blobs';
 
+// Reads the current items list, applies `mutate`, and writes it back using an
+// ETag-conditional write. If another request wrote in between, it retries
+// with fresh data instead of silently overwriting the other change.
+async function applyItemsUpdate(store, mutate) {
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const existing = await store.getWithMetadata('items', { type: 'json', consistency: 'strong' });
+    const currentItems = existing && Array.isArray(existing.data) ? existing.data : [];
+    const nextItems = mutate(currentItems);
+
+    const writeOpts = existing && existing.etag ? { onlyIfMatch: existing.etag } : { onlyIfNew: true };
+    const result = await store.setJSON('items', nextItems, writeOpts);
+
+    if (!result || result.modified !== false) {
+      return nextItems;
+    }
+    // Someone else wrote in between — loop and retry with fresh data.
+  }
+  throw new Error('Could not save changes due to concurrent updates. Please try again.');
+}
+
 export default async (req) => {
   const store = getStore('props-inventory');
   const photoStore = getStore('props-inventory-photos');
@@ -9,12 +29,12 @@ export default async (req) => {
     if (req.method === 'GET') {
       const photoId = url.searchParams.get('photo');
       if (photoId) {
-        const photo = await photoStore.get(photoId, { type: 'text' });
+        const photo = await photoStore.get(photoId, { type: 'text', consistency: 'strong' });
         return new Response(JSON.stringify({ photo: photo || null }), {
           headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, max-age=0' }
         });
       }
-      const data = await store.get('items', { type: 'json' });
+      const data = await store.get('items', { type: 'json', consistency: 'strong' });
       return new Response(JSON.stringify({ items: data || [] }), {
         headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, max-age=0' }
       });
@@ -28,28 +48,30 @@ export default async (req) => {
         return new Response(JSON.stringify({ error: 'Invalid JSON' }), { status: 400 });
       }
 
-      const current = await store.get('items', { type: 'json' });
-      let items = Array.isArray(current) ? current : [];
+      await applyItemsUpdate(store, (items) => {
+        let next = items;
 
-      if (body.upsertItem && body.upsertItem.id) {
-        const idx = items.findIndex(it => it.id === body.upsertItem.id);
-        if (idx >= 0) {
-          items[idx] = body.upsertItem;
-        } else {
-          items.push(body.upsertItem);
+        if (body.upsertItem && body.upsertItem.id) {
+          const idx = next.findIndex(it => it.id === body.upsertItem.id);
+          if (idx >= 0) {
+            next = next.slice();
+            next[idx] = body.upsertItem;
+          } else {
+            next = next.concat([body.upsertItem]);
+          }
         }
-      }
 
-      if (body.deleteItemId) {
-        items = items.filter(it => it.id !== body.deleteItemId);
-      }
+        if (body.deleteItemId) {
+          next = next.filter(it => it.id !== body.deleteItemId);
+        }
 
-      // Backward-compat / bulk replace (used rarely, e.g. full re-sync)
-      if (Array.isArray(body.items)) {
-        items = body.items;
-      }
+        // Backward-compat / bulk replace (used rarely, e.g. full re-sync)
+        if (Array.isArray(body.items)) {
+          next = body.items;
+        }
 
-      await store.setJSON('items', items);
+        return next;
+      });
 
       if (body.photoUpdates && typeof body.photoUpdates === 'object') {
         for (const [id, dataUrl] of Object.entries(body.photoUpdates)) {
