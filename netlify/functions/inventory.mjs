@@ -11,12 +11,12 @@ export default async (req) => {
       if (photoId) {
         const photo = await photoStore.get(photoId, { type: 'text' });
         return new Response(JSON.stringify({ photo: photo || null }), {
-          headers: { 'Content-Type': 'application/json' }
+          headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, max-age=0' }
         });
       }
       const data = await store.get('items', { type: 'json' });
       return new Response(JSON.stringify({ items: data || [] }), {
-        headers: { 'Content-Type': 'application/json' }
+        headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, max-age=0' }
       });
     }
 
