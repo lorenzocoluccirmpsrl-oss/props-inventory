@@ -749,7 +749,7 @@ function render(){
       if(!hay.includes(q)) return false;
     }
     return true;
-  }).sort((a,b)=> (b.updatedAt||'').localeCompare(a.updatedAt||''));
+  });
 
   const content = el('content');
   content.classList.remove('loading');
