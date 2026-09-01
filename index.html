@@ -554,7 +554,6 @@ async function loadItems(){
       availability: needsAvailabilityMigration,
       defaultBrand: needsBrandMigration ? 'TNF EMEA' : null
     });
-    // Re-fetch once, since the migration happened entirely server-side.
     try{
       const res3 = await fetch('/api/inventory', { cache: 'no-store' });
       const data3 = await res3.json();
@@ -562,6 +561,12 @@ async function loadItems(){
     }catch(e){
       console.error(e);
     }
+  }
+
+  if(brands.some(b => b.toLowerCase() === 'main') && !brands.some(b => b.toLowerCase() === 'tnf emea')){
+    await renameBrandRemote('Main', 'TNF EMEA');
+    brands = brands.map(b => b.toLowerCase() === 'main' ? 'TNF EMEA' : b);
+    items = items.map(it => (it.brand && it.brand.toLowerCase() === 'main') ? { ...it, brand: 'TNF EMEA' } : it);
   }
 
   if(currentBrand !== 'ALL' && !brands.includes(currentBrand)){
@@ -581,6 +586,20 @@ async function migrateRemote(migrate){
     if(!res.ok) throw new Error('Network error');
   }catch(e){
     showToast('Error running one-time data migration. Please reload the page.', 'error');
+    console.error(e);
+  }
+}
+
+async function renameBrandRemote(from, to){
+  try{
+    const res = await fetch('/api/inventory', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ renameBrand: { from, to } })
+    });
+    if(!res.ok) throw new Error('Network error');
+  }catch(e){
+    showToast('Error renaming the brand. Please try again.', 'error');
     console.error(e);
   }
 }
