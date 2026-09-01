@@ -83,6 +83,26 @@ export default async (req) => {
         }
       }
 
+      if (body.migrate) {
+        const m = body.migrate;
+        await applyBlobUpdate(store, 'items', (items) => {
+          const next = Array.isArray(items) ? items : [];
+          return next.map((it) => {
+            let updated = it;
+            if (m.availability) {
+              if (updated.availability === 'Disponibile') updated = { ...updated, availability: 'AVAILABLE' };
+              if (['Non disponibile', 'In uso', 'Esaurito'].includes(updated.availability)) {
+                updated = { ...updated, availability: 'MISSING' };
+              }
+            }
+            if (m.defaultBrand && !updated.brand) {
+              updated = { ...updated, brand: m.defaultBrand };
+            }
+            return updated;
+          });
+        });
+      }
+
       if (body.upsertItem || body.deleteItemId || Array.isArray(body.items)) {
         await applyBlobUpdate(store, 'items', (items) => {
           let next = Array.isArray(items) ? items : [];
