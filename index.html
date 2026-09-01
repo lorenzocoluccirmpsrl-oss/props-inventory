@@ -63,6 +63,17 @@ header{
 .stat .n{font-family:'Oswald',sans-serif;font-size:22px;font-weight:600;}
 .stat .l{font-size:9px;letter-spacing:1.5px;text-transform:uppercase;color:var(--ink-soft);}
 
+/* BRAND TABS */
+.brand-tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px;}
+.brand-tab{
+  font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:1px;text-transform:uppercase;
+  padding:8px 14px;border:1.5px solid var(--ink);background:var(--card);color:var(--ink);
+  cursor:pointer;font-weight:600;
+}
+.brand-tab:hover{opacity:0.85;}
+.brand-tab.active{background:var(--ink);color:var(--paper);}
+.brand-tab.add-tab{border-style:dashed;color:var(--ink-soft);background:transparent;font-weight:400;}
+
 /* TOOLBAR */
 .toolbar{
   display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:18px;
@@ -243,8 +254,10 @@ button:hover{opacity:0.85;}
     <div class="stats" id="stats"></div>
   </header>
 
+  <div class="brand-tabs" id="brandTabs"></div>
+
   <div class="toolbar">
-    <input type="text" id="search" placeholder="Search by TERRITORY, PRODUCT, ORDER, QUANTITY, SIZE, ACTIVITY, NOTE...">
+    <input type="text" id="search" placeholder="Search by BRAND, TERRITORY, PRODUCT, ORDER, QUANTITY, SIZE, ACTIVITY, NOTE...">
     <select id="filterTerritory"><option value="">TERRITORY</option></select>
     <select id="filterAvailability">
       <option value="">AVAILABILITY</option>
@@ -253,6 +266,7 @@ button:hover{opacity:0.85;}
     </select>
     <div class="spacer"></div>
     <button class="secondary" id="btnExport" type="button">⬇ Export XLS</button>
+    <button class="secondary" id="btnBackups" type="button">🗄 Backups</button>
     <button class="secondary" id="btnLock" type="button">🔒 Unlock editing</button>
     <button id="btnNew">+ New prop</button>
   </div>
@@ -274,6 +288,7 @@ button:hover{opacity:0.85;}
         </div>
       </div>
 
+      <div class="field"><label>Brand</label><select id="f_brand"></select></div>
       <div class="field"><label>Territory</label><input type="text" id="f_territory" placeholder="e.g. IT-North"></div>
       <div class="field"><label>Product</label><input type="text" id="f_prodotto" placeholder="e.g. Director chair"></div>
       <div class="field"><label>Order</label><input type="text" id="f_ordine" placeholder="e.g. ORD-2026-014"></div>
@@ -359,6 +374,49 @@ button:hover{opacity:0.85;}
   </div>
 </div>
 
+<div class="overlay" id="brandOverlay">
+  <div class="dialog">
+    <h4>New brand</h4>
+    <p>Enter the name of the new brand tab.</p>
+    <input type="text" id="brandNameInput" placeholder="e.g. Brand XYZ">
+    <div class="err" id="brandErr">Please enter a name.</div>
+    <div class="actions">
+      <button class="secondary" id="brandCancel">Cancel</button>
+      <button id="brandSubmit">Add brand</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="backupsOverlay">
+  <div class="dialog" style="max-width:560px;">
+    <h4>Backups</h4>
+    <p>Daily automatic snapshots of the whole inventory, kept for 14 days. Read-only — pick a date to see how a prop looked back then, and copy the info manually if you need to recover something.</p>
+    <div id="backupsList" style="font-size:12px;color:var(--ink-soft);">Loading...</div>
+    <div id="backupDetail" style="display:none;margin-top:14px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+        <strong id="backupDetailTitle" style="font-family:'Oswald',sans-serif;text-transform:uppercase;font-size:13px;"></strong>
+        <button class="ghost" id="backupBack">← Back to list</button>
+      </div>
+      <div id="backupTableWrap" style="max-height:340px;overflow-y:auto;border:1px solid var(--line);">
+        <table style="width:100%;border-collapse:collapse;font-size:11px;">
+          <thead>
+            <tr style="text-align:left;border-bottom:1.5px solid var(--ink);">
+              <th style="padding:6px 8px;">Territory</th>
+              <th style="padding:6px 8px;">Product</th>
+              <th style="padding:6px 8px;">Availability</th>
+              <th style="padding:6px 8px;">Note</th>
+            </tr>
+          </thead>
+          <tbody id="backupTableBody"></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="actions">
+      <button class="secondary" id="backupsClose">Close</button>
+    </div>
+  </div>
+</div>
+
 <div class="toast-wrap" id="toastWrap"></div>
 
 <script>
@@ -367,6 +425,8 @@ const OWNER_PASSWORD = 'lorenzo';
 let unlocked = false;
 let ownerUnlocked = false;
 let items = [];
+let brands = [];
+let currentBrand = 'ALL';
 let editingId = null;
 let currentPhoto = null;
 let currentPhotoFull = null;
@@ -471,6 +531,15 @@ async function loadItems(){
     items = [];
     console.error(e);
   }
+  try{
+    const res2 = await fetch('/api/inventory?brands=list', { cache: 'no-store' });
+    const data2 = await res2.json();
+    brands = Array.isArray(data2.brands) ? data2.brands : [];
+  }catch(e){
+    brands = [];
+    console.error(e);
+  }
+
   let migratedItems = [];
   items = items.map(it => {
     let changed = false;
@@ -482,8 +551,83 @@ async function loadItems(){
   for(const it of migratedItems){
     await saveItem(it, {});
   }
+
+  // Migrate legacy items that don't have a brand yet into a default "Main" brand.
+  const itemsWithoutBrand = items.filter(it => !it.brand);
+  if(itemsWithoutBrand.length > 0){
+    if(!brands.some(b => b.toLowerCase() === 'main')){
+      await addBrandRemote('Main');
+      brands.push('Main');
+    }
+    for(const it of itemsWithoutBrand){
+      it.brand = 'Main';
+      await saveItem(it, {});
+    }
+  }
+
+  if(currentBrand !== 'ALL' && !brands.includes(currentBrand)){
+    currentBrand = 'ALL';
+  }
+
   render();
 }
+
+async function addBrandRemote(name){
+  try{
+    const res = await fetch('/api/inventory', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ addBrand: name })
+    });
+    if(!res.ok) throw new Error('Network error');
+  }catch(e){
+    showToast('Error saving the brand. Please try again.', 'error');
+    console.error(e);
+  }
+}
+
+function renderBrandTabs(){
+  const tabsHtml = ['ALL', ...brands].map(b => `
+    <button type="button" class="brand-tab ${currentBrand===b ? 'active':''}" data-brand="${escapeHtml(b)}">${escapeHtml(b)}</button>
+  `).join('') + `<button type="button" class="brand-tab add-tab" id="btnAddBrand">+ Add brand</button>`;
+  el('brandTabs').innerHTML = tabsHtml;
+  el('brandTabs').querySelectorAll('.brand-tab[data-brand]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      currentBrand = btn.dataset.brand;
+      render();
+    });
+  });
+  el('btnAddBrand').addEventListener('click', openAddBrandDialog);
+}
+
+let pendingBrandResolve = null;
+async function openAddBrandDialog(){
+  if(!(await requireAuth())) return;
+  el('brandNameInput').value = '';
+  el('brandErr').style.display = 'none';
+  el('brandOverlay').classList.add('open');
+  setTimeout(()=> el('brandNameInput').focus(), 50);
+}
+el('brandCancel').addEventListener('click', ()=> el('brandOverlay').classList.remove('open'));
+el('brandNameInput').addEventListener('keydown', (e)=>{ if(e.key === 'Enter') el('brandSubmit').click(); });
+el('brandSubmit').addEventListener('click', async ()=>{
+  const name = el('brandNameInput').value.trim();
+  if(!name){
+    el('brandErr').style.display = 'block';
+    return;
+  }
+  if(brands.some(b => b.toLowerCase() === name.toLowerCase())){
+    el('brandErr').textContent = 'This brand already exists.';
+    el('brandErr').style.display = 'block';
+    return;
+  }
+  await addBrandRemote(name);
+  brands.push(name);
+  currentBrand = name;
+  el('brandOverlay').classList.remove('open');
+  render();
+  showToast('Brand added.');
+});
 
 async function saveItem(itemData, photoUpdates){
   try{
@@ -556,6 +700,9 @@ function openPanel(item){
   currentPhotoFull = null;
   photoChanged = false;
   el('photoDrop').innerHTML = currentPhoto ? `<img src="${currentPhoto}">` : '<span>Upload<br>photo</span>';
+  el('f_brand').innerHTML = brands.map(b => `<option>${escapeHtml(b)}</option>`).join('');
+  const defaultBrand = item ? item.brand : (currentBrand !== 'ALL' ? currentBrand : (brands[0] || ''));
+  if(defaultBrand) el('f_brand').value = defaultBrand;
   el('f_territory').value = item ? item.territory : '';
   el('f_prodotto').value = item ? item.prodotto : '';
   el('f_ordine').value = item ? item.ordine : '';
@@ -583,7 +730,14 @@ function toggleNoteField(){
   if(!isMissing) el('f_note').value = '';
 }
 
-el('btnNew').addEventListener('click', async ()=>{ if(await requireAuth()) openPanel(null); });
+el('btnNew').addEventListener('click', async ()=>{
+  if(!(await requireAuth())) return;
+  if(brands.length === 0){
+    showToast('Please add a brand first, using "+ Add brand" above.', 'error');
+    return;
+  }
+  openPanel(null);
+});
 el('btnCancel').addEventListener('click', closePanel);
 
 el('btnSave').addEventListener('click', async ()=>{
@@ -612,6 +766,7 @@ el('btnSave').addEventListener('click', async ()=>{
   const data = {
     id: editingId || (Date.now().toString(36) + Math.random().toString(36).slice(2,7)),
     photo: currentPhoto,
+    brand: el('f_brand').value,
     territory: el('f_territory').value.trim(),
     prodotto,
     ordine: el('f_ordine').value.trim(),
@@ -716,17 +871,17 @@ function badgeClass(av){
   return av.replace(/\s+/g,'.');
 }
 
-function updateFilters(){
-  const territories = [...new Set(items.map(i=>i.territory).filter(Boolean))].sort();
+function updateFilters(scopedItems){
+  const territories = [...new Set(scopedItems.map(i=>i.territory).filter(Boolean))].sort();
   const sel = el('filterTerritory');
   const current = sel.value;
   sel.innerHTML = '<option value="">TERRITORY</option>' + territories.map(t=>`<option${t===current?' selected':''}>${t}</option>`).join('');
 }
 
-function renderStats(){
-  const total = items.length;
-  const disp = items.filter(i=>i.availability==='AVAILABLE').length;
-  const nonDisp = items.filter(i=>i.availability==='MISSING').length;
+function renderStats(scopedItems){
+  const total = scopedItems.length;
+  const disp = scopedItems.filter(i=>i.availability==='AVAILABLE').length;
+  const nonDisp = scopedItems.filter(i=>i.availability==='MISSING').length;
   el('stats').innerHTML = `
     <div class="stat"><div class="n">${total}</div><div class="l">Items</div></div>
     <div class="stat"><div class="n">${disp}</div><div class="l">Available</div></div>
@@ -735,17 +890,19 @@ function renderStats(){
 }
 
 function render(){
-  updateFilters();
-  renderStats();
+  renderBrandTabs();
+  const brandItems = currentBrand === 'ALL' ? items : items.filter(it => it.brand === currentBrand);
+  updateFilters(brandItems);
+  renderStats(brandItems);
   const q = el('search').value.trim().toLowerCase();
   const fTerritory = el('filterTerritory').value;
   const fAvail = el('filterAvailability').value;
 
-  let filtered = items.filter(it => {
+  let filtered = brandItems.filter(it => {
     if(fTerritory && it.territory !== fTerritory) return false;
     if(fAvail && it.availability !== fAvail) return false;
     if(q){
-      const hay = [it.territory,it.prodotto,it.ordine,it.size,it.activity,it.note].join(' ').toLowerCase();
+      const hay = [it.brand,it.territory,it.prodotto,it.ordine,it.size,it.activity,it.note].join(' ').toLowerCase();
       if(!hay.includes(q)) return false;
     }
     return true;
@@ -756,6 +913,10 @@ function render(){
 
   if(items.length === 0){
     content.innerHTML = `<div class="empty"><b>The warehouse is empty</b>Add the first prop sheet to start your inventory.</div>`;
+    return;
+  }
+  if(brandItems.length === 0){
+    content.innerHTML = `<div class="empty"><b>No props in this brand yet</b>Add a new prop while this tab is selected, or switch to another brand.</div>`;
     return;
   }
   if(filtered.length === 0){
@@ -769,6 +930,7 @@ function render(){
         ${it.photo ? `<img src="${it.photo}" onclick="openLightbox('${it.id}', event)">` : `<span class="ph">Nessuna foto</span>`}
       </div>
       <h4>${escapeHtml(it.prodotto)}</h4>
+      <div class="row"><span>Brand</span><span>${escapeHtml(it.brand)||'—'}</span></div>
       <div class="row"><span>Territory</span><span>${escapeHtml(it.territory)||'—'}</span></div>
       <div class="row"><span>Order</span><span>${escapeHtml(it.ordine)||'—'}</span></div>
       <div class="row"><span>Quantity</span><span>${it.quantity ?? '—'}</span></div>
@@ -849,21 +1011,23 @@ function historyToText(history){
 }
 
 function exportXLSX(){
-  const headers = ['Territory','Product','Order','Quantity','Size','Availability','Activity','Note','History'];
-  const rows = items.map(it => [
-    it.territory || '', it.prodotto || '', it.ordine || '', it.quantity ?? '', it.size || '',
+  const scopedItems = currentBrand === 'ALL' ? items : items.filter(it => it.brand === currentBrand);
+  const headers = ['Brand','Territory','Product','Order','Quantity','Size','Availability','Activity','Note','History'];
+  const rows = scopedItems.map(it => [
+    it.brand || '', it.territory || '', it.prodotto || '', it.ordine || '', it.quantity ?? '', it.size || '',
     it.availability || '', it.activity || '', it.note || '', historyToText(it.history)
   ]);
   const wsData = [headers, ...rows];
   const ws = XLSX.utils.aoa_to_sheet(wsData);
   ws['!cols'] = [
-    { wch: 14 }, { wch: 26 }, { wch: 14 }, { wch: 10 }, { wch: 10 },
+    { wch: 14 }, { wch: 14 }, { wch: 26 }, { wch: 14 }, { wch: 10 }, { wch: 10 },
     { wch: 14 }, { wch: 20 }, { wch: 24 }, { wch: 50 }
   ];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Inventory');
   const stamp = new Date().toISOString().slice(0,10);
-  XLSX.writeFile(wb, `props-inventory-${stamp}.xlsx`);
+  const brandLabel = currentBrand === 'ALL' ? 'all-brands' : currentBrand.toLowerCase().replace(/\s+/g,'-');
+  XLSX.writeFile(wb, `props-inventory-${brandLabel}-${stamp}.xlsx`);
 }
 
 el('btnExport').addEventListener('click', ()=>{
@@ -880,6 +1044,66 @@ el('btnExport').addEventListener('click', ()=>{
 
 updateLockButton();
 loadItems();
+
+el('btnBackups').addEventListener('click', async ()=>{
+  if(!(await requireOwnerAuth())) return;
+  openBackupsDialog();
+});
+
+async function openBackupsDialog(){
+  el('backupDetail').style.display = 'none';
+  el('backupsList').style.display = 'block';
+  el('backupsList').textContent = 'Loading...';
+  el('backupsOverlay').classList.add('open');
+  try{
+    const res = await fetch('/api/inventory?backups=list', { cache: 'no-store' });
+    const data = await res.json();
+    const dates = Array.isArray(data.dates) ? data.dates : [];
+    if(dates.length === 0){
+      el('backupsList').textContent = 'No backups yet. The first automatic backup runs at midnight (UTC).';
+      return;
+    }
+    el('backupsList').innerHTML = dates.map(d => `
+      <button class="secondary" style="display:block;width:100%;text-align:left;margin-bottom:6px;" onclick="openBackupDetail('${d}')">${d}</button>
+    `).join('');
+  }catch(e){
+    el('backupsList').textContent = 'Could not load backups.';
+    console.error(e);
+  }
+}
+
+window.openBackupDetail = async (date) => {
+  el('backupDetailTitle').textContent = date;
+  el('backupsList').style.display = 'none';
+  el('backupDetail').style.display = 'block';
+  el('backupTableBody').innerHTML = '<tr><td style="padding:8px;" colspan="4">Loading...</td></tr>';
+  try{
+    const res = await fetch('/api/inventory?backup=' + encodeURIComponent(date), { cache: 'no-store' });
+    const data = await res.json();
+    const backupItems = data.backup && Array.isArray(data.backup.items) ? data.backup.items : [];
+    if(backupItems.length === 0){
+      el('backupTableBody').innerHTML = '<tr><td style="padding:8px;" colspan="4">Empty backup.</td></tr>';
+      return;
+    }
+    el('backupTableBody').innerHTML = backupItems.map(it => `
+      <tr style="border-bottom:1px dotted var(--line);">
+        <td style="padding:6px 8px;">${escapeHtml(it.territory)||'—'}</td>
+        <td style="padding:6px 8px;">${escapeHtml(it.prodotto)||'—'}</td>
+        <td style="padding:6px 8px;">${escapeHtml(it.availability)||'—'}</td>
+        <td style="padding:6px 8px;">${escapeHtml(it.note)||'—'}</td>
+      </tr>
+    `).join('');
+  }catch(e){
+    el('backupTableBody').innerHTML = '<tr><td style="padding:8px;" colspan="4">Could not load this backup.</td></tr>';
+    console.error(e);
+  }
+};
+
+el('backupBack').addEventListener('click', ()=>{
+  el('backupDetail').style.display = 'none';
+  el('backupsList').style.display = 'block';
+});
+el('backupsClose').addEventListener('click', ()=> el('backupsOverlay').classList.remove('open'));
 </script>
 </body>
 </html>
