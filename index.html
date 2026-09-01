@@ -540,28 +540,27 @@ async function loadItems(){
     console.error(e);
   }
 
-  let migratedItems = [];
-  items = items.map(it => {
-    let changed = false;
-    if(it.availability === 'Disponibile'){ it.availability = 'AVAILABLE'; changed = true; }
-    if(it.availability === 'Non disponibile' || it.availability === 'In uso' || it.availability === 'Esaurito'){ it.availability = 'MISSING'; changed = true; }
-    if(changed) migratedItems.push(it);
-    return it;
-  });
-  for(const it of migratedItems){
-    await saveItem(it, {});
-  }
+  const needsAvailabilityMigration = items.some(it =>
+    ['Disponibile','Non disponibile','In uso','Esaurito'].includes(it.availability)
+  );
+  const needsBrandMigration = items.some(it => !it.brand);
 
-  // Migrate legacy items that don't have a brand yet into a default "Main" brand.
-  const itemsWithoutBrand = items.filter(it => !it.brand);
-  if(itemsWithoutBrand.length > 0){
-    if(!brands.some(b => b.toLowerCase() === 'main')){
-      await addBrandRemote('Main');
-      brands.push('Main');
+  if(needsAvailabilityMigration || needsBrandMigration){
+    if(needsBrandMigration && !brands.some(b => b.toLowerCase() === 'tnf emea')){
+      await addBrandRemote('TNF EMEA');
+      brands.push('TNF EMEA');
     }
-    for(const it of itemsWithoutBrand){
-      it.brand = 'Main';
-      await saveItem(it, {});
+    await migrateRemote({
+      availability: needsAvailabilityMigration,
+      defaultBrand: needsBrandMigration ? 'TNF EMEA' : null
+    });
+    // Re-fetch once, since the migration happened entirely server-side.
+    try{
+      const res3 = await fetch('/api/inventory', { cache: 'no-store' });
+      const data3 = await res3.json();
+      items = Array.isArray(data3.items) ? data3.items : items;
+    }catch(e){
+      console.error(e);
     }
   }
 
@@ -570,6 +569,20 @@ async function loadItems(){
   }
 
   render();
+}
+
+async function migrateRemote(migrate){
+  try{
+    const res = await fetch('/api/inventory', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ migrate })
+    });
+    if(!res.ok) throw new Error('Network error');
+  }catch(e){
+    showToast('Error running one-time data migration. Please reload the page.', 'error');
+    console.error(e);
+  }
 }
 
 async function addBrandRemote(name){
@@ -705,405 +718,4 @@ function openPanel(item){
   if(defaultBrand) el('f_brand').value = defaultBrand;
   el('f_territory').value = item ? item.territory : '';
   el('f_prodotto').value = item ? item.prodotto : '';
-  el('f_ordine').value = item ? item.ordine : '';
-  el('f_quantity').value = item ? item.quantity : '';
-  el('f_size').value = item ? item.size : '';
-  el('f_availability').value = item ? item.availability : 'AVAILABLE';
-  el('f_note').value = item ? (item.note || '') : '';
-  toggleNoteField();
-  el('f_activity').value = item ? item.activity : '';
-  el('panelOverlay').classList.add('open');
-}
-
-function closePanel(){
-  el('panelOverlay').classList.remove('open');
-  editingId = null;
-  currentPhoto = null;
-  currentPhotoFull = null;
-  photoChanged = false;
-}
-
-el('f_availability').addEventListener('change', toggleNoteField);
-function toggleNoteField(){
-  const isMissing = el('f_availability').value === 'MISSING';
-  el('noteField').style.display = isMissing ? 'block' : 'none';
-  if(!isMissing) el('f_note').value = '';
-}
-
-el('btnNew').addEventListener('click', async ()=>{
-  if(!(await requireAuth())) return;
-  if(brands.length === 0){
-    showToast('Please add a brand first, using "+ Add brand" above.', 'error');
-    return;
-  }
-  openPanel(null);
-});
-el('btnCancel').addEventListener('click', closePanel);
-
-el('btnSave').addEventListener('click', async ()=>{
-  const prodotto = el('f_prodotto').value.trim();
-  if(!prodotto){
-    showToast('The Product field is required.', 'error');
-    return;
-  }
-  const availability = el('f_availability').value;
-  const note = el('f_note').value.trim();
-  if(availability === 'MISSING' && !note){
-    showToast('Please add a note: the reason why the prop is MISSING (e.g. shipping, repair, loan).', 'error');
-    el('f_note').focus();
-    return;
-  }
-  const existing = editingId ? items.find(it => it.id === editingId) : null;
-  const history = existing && Array.isArray(existing.history) ? existing.history.slice() : [];
-  const statusChanged = !existing || existing.availability !== availability || (availability === 'MISSING' && existing.note !== note);
-  if(statusChanged){
-    history.push({
-      date: new Date().toISOString(),
-      availability,
-      note: availability === 'MISSING' ? note : ''
-    });
-  }
-  const data = {
-    id: editingId || (Date.now().toString(36) + Math.random().toString(36).slice(2,7)),
-    photo: currentPhoto,
-    brand: el('f_brand').value,
-    territory: el('f_territory').value.trim(),
-    prodotto,
-    ordine: el('f_ordine').value.trim(),
-    quantity: el('f_quantity').value === '' ? 0 : Number(el('f_quantity').value),
-    size: el('f_size').value.trim(),
-    availability,
-    note: availability === 'MISSING' ? note : '',
-    activity: el('f_activity').value.trim(),
-    history,
-    updatedAt: new Date().toISOString()
-  };
-  if(editingId){
-    items = items.map(it => it.id === editingId ? data : it);
-  }else{
-    items.push(data);
-  }
-  const photoUpdates = photoChanged ? { [data.id]: currentPhotoFull || null } : {};
-  await saveItem(data, photoUpdates);
-  closePanel();
-  render();
-});
-
-async function deleteItem(id){
-  if(!(await requireAuth())) return;
-  if(!(await askConfirm('Delete this prop sheet? This action cannot be undone.', 'Delete'))) return;
-  items = items.filter(it => it.id !== id);
-  await deleteItemRemote(id, { [id]: null });
-  render();
-}
-window.deleteItem = deleteItem;
-window.editItem = async (id) => { if(await requireAuth()) openPanel(items.find(it=>it.id===id)); };
-
-let pendingHistoryItemId = null;
-async function addHistoryEntry(itemId){
-  if(!(await requireOwnerAuth())) return;
-  pendingHistoryItemId = itemId;
-  el('h_date').value = new Date().toISOString().slice(0,10);
-  el('h_availability').value = 'AVAILABLE';
-  el('h_note').value = '';
-  el('h_err').style.display = 'none';
-  el('historyOverlay').classList.add('open');
-}
-window.addHistoryEntry = addHistoryEntry;
-
-el('hCancel').addEventListener('click', ()=> el('historyOverlay').classList.remove('open'));
-el('hSave').addEventListener('click', async ()=>{
-  const dateVal = el('h_date').value;
-  if(!dateVal){
-    el('h_err').textContent = 'Please select a date using the calendar field above.';
-    el('h_err').style.display = 'block';
-    return;
-  }
-  const availability = el('h_availability').value;
-  const note = el('h_note').value.trim();
-  if(availability === 'MISSING' && !note){
-    el('h_err').textContent = 'Please add a note for a MISSING entry.';
-    el('h_err').style.display = 'block';
-    return;
-  }
-  const iso = new Date(dateVal + 'T12:00:00').toISOString();
-  let updatedItem = null;
-  items = items.map(it => {
-    if(it.id !== pendingHistoryItemId) return it;
-    const history = Array.isArray(it.history) ? it.history.slice() : [];
-    history.push({ date: iso, availability, note: availability === 'MISSING' ? note : '' });
-    updatedItem = { ...it, history };
-    return updatedItem;
-  });
-  el('historyOverlay').classList.remove('open');
-  if(updatedItem) await saveItem(updatedItem, {});
-  render();
-  showToast('History entry added.');
-});
-
-async function openLightbox(itemId, evt){
-  const thumbSrc = evt && evt.target ? evt.target.src : '';
-  el('lightboxImg').src = thumbSrc;
-  el('lightbox').classList.add('open');
-  el('lightbox').classList.add('loading-hq');
-  try{
-    const res = await fetch('/api/inventory?photo=' + encodeURIComponent(itemId));
-    if(res.ok){
-      const data = await res.json();
-      if(data.photo){
-        el('lightboxImg').src = data.photo;
-      }
-    }
-  }catch(e){
-    console.error(e);
-  }
-  el('lightbox').classList.remove('loading-hq');
-}
-function closeLightbox(){
-  el('lightbox').classList.remove('open');
-  el('lightboxImg').src = '';
-}
-document.addEventListener('keydown', e => {
-  if(e.key === 'Escape') closeLightbox();
-});
-
-function badgeClass(av){
-  return av.replace(/\s+/g,'.');
-}
-
-function updateFilters(scopedItems){
-  const territories = [...new Set(scopedItems.map(i=>i.territory).filter(Boolean))].sort();
-  const sel = el('filterTerritory');
-  const current = sel.value;
-  sel.innerHTML = '<option value="">TERRITORY</option>' + territories.map(t=>`<option${t===current?' selected':''}>${t}</option>`).join('');
-}
-
-function renderStats(scopedItems){
-  const total = scopedItems.length;
-  const disp = scopedItems.filter(i=>i.availability==='AVAILABLE').length;
-  const nonDisp = scopedItems.filter(i=>i.availability==='MISSING').length;
-  el('stats').innerHTML = `
-    <div class="stat"><div class="n">${total}</div><div class="l">Items</div></div>
-    <div class="stat"><div class="n">${disp}</div><div class="l">Available</div></div>
-    <div class="stat"><div class="n">${nonDisp}</div><div class="l">Missing</div></div>
-  `;
-}
-
-function render(){
-  renderBrandTabs();
-  const brandItems = currentBrand === 'ALL' ? items : items.filter(it => it.brand === currentBrand);
-  updateFilters(brandItems);
-  renderStats(brandItems);
-  const q = el('search').value.trim().toLowerCase();
-  const fTerritory = el('filterTerritory').value;
-  const fAvail = el('filterAvailability').value;
-
-  let filtered = brandItems.filter(it => {
-    if(fTerritory && it.territory !== fTerritory) return false;
-    if(fAvail && it.availability !== fAvail) return false;
-    if(q){
-      const hay = [it.brand,it.territory,it.prodotto,it.ordine,it.size,it.activity,it.note].join(' ').toLowerCase();
-      if(!hay.includes(q)) return false;
-    }
-    return true;
-  });
-
-  const content = el('content');
-  content.classList.remove('loading');
-
-  if(items.length === 0){
-    content.innerHTML = `<div class="empty"><b>The warehouse is empty</b>Add the first prop sheet to start your inventory.</div>`;
-    return;
-  }
-  if(brandItems.length === 0){
-    content.innerHTML = `<div class="empty"><b>No props in this brand yet</b>Add a new prop while this tab is selected, or switch to another brand.</div>`;
-    return;
-  }
-  if(filtered.length === 0){
-    content.innerHTML = `<div class="empty"><b>No results</b>No sheet matches the current filters.</div>`;
-    return;
-  }
-
-  content.innerHTML = `<div class="grid">` + filtered.map(it => `
-    <div class="tag-card">
-      <div class="photo">
-        ${it.photo ? `<img src="${it.photo}" onclick="openLightbox('${it.id}', event)">` : `<span class="ph">Nessuna foto</span>`}
-      </div>
-      <h4>${escapeHtml(it.prodotto)}</h4>
-      <div class="row"><span>Brand</span><span>${escapeHtml(it.brand)||'—'}</span></div>
-      <div class="row"><span>Territory</span><span>${escapeHtml(it.territory)||'—'}</span></div>
-      <div class="row"><span>Order</span><span>${escapeHtml(it.ordine)||'—'}</span></div>
-      <div class="row"><span>Quantity</span><span>${it.quantity ?? '—'}</span></div>
-      <div class="row"><span>Size</span><span>${escapeHtml(it.size)||'—'}</span></div>
-      <div class="row"><span>Activity</span><span>${escapeHtml(it.activity)||'—'}</span></div>
-      ${it.availability === 'MISSING' && it.note ? `<div class="row" style="border-bottom:none;"><span>Note</span><span style="color:var(--red);text-align:right;max-width:60%;">${escapeHtml(it.note)}</span></div>` : ''}
-      <span class="badge ${badgeClass(it.availability)}">${it.availability}</span>
-      ${renderHistory(it)}
-      <div class="card-actions">
-        <button class="ghost" onclick="editItem('${it.id}')">Edit</button>
-        <button class="ghost" onclick="addHistoryEntry('${it.id}')">+ History</button>
-        <button class="ghost" onclick="deleteItem('${it.id}')">Delete</button>
-      </div>
-    </div>
-  `).join('') + `</div>`;
-}
-
-function formatDate(iso){
-  try{
-    const d = new Date(iso);
-    return d.toLocaleDateString('en-GB') + ' ' + d.toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'});
-  }catch(e){ return iso; }
-}
-
-function renderHistory(it){
-  const history = Array.isArray(it.history) ? it.history : [];
-  if(history.length === 0) return '';
-  const indexed = history.map((h, idx) => Object.assign({}, h, { __idx: idx }));
-  const sorted = indexed.slice().sort((a,b) => (b.date||'').localeCompare(a.date||''));
-  const rows = sorted.map(h => `
-    <li>
-      <span class="h-date">${formatDate(h.date)}</span>
-      <span class="h-status ${badgeClass(h.availability)}">${h.availability}</span>
-      ${h.note ? `<span class="h-note">${escapeHtml(h.note)}</span>` : ''}
-      <button class="ghost h-del" onclick="deleteHistoryEntry('${it.id}', ${h.__idx})" title="Delete this entry">✕</button>
-    </li>
-  `).join('');
-  return `
-    <details class="history">
-      <summary>History (${history.length})</summary>
-      <ul>${rows}</ul>
-    </details>
-  `;
-}
-
-window.deleteHistoryEntry = async (itemId, idx) => {
-  if(!(await requireOwnerAuth())) return;
-  if(!(await askConfirm('Delete this history entry? This action cannot be undone.', 'Delete'))) return;
-  let updatedItem = null;
-  items = items.map(it => {
-    if(it.id !== itemId) return it;
-    const history = Array.isArray(it.history) ? it.history.slice() : [];
-    history.splice(idx, 1);
-    updatedItem = Object.assign({}, it, { history });
-    return updatedItem;
-  });
-  if(updatedItem) await saveItem(updatedItem, {});
-  render();
-  showToast('History entry deleted.');
-};
-
-function escapeHtml(s){
-  if(s===undefined || s===null) return '';
-  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-}
-
-el('search').addEventListener('input', render);
-el('filterTerritory').addEventListener('change', render);
-el('filterAvailability').addEventListener('change', render);
-
-function historyToText(history){
-  if(!Array.isArray(history) || history.length === 0) return '';
-  return history
-    .slice()
-    .sort((a,b) => (a.date||'').localeCompare(b.date||''))
-    .map(h => `${formatDate(h.date)} - ${h.availability}${h.note ? ' (' + h.note + ')' : ''}`)
-    .join(' | ');
-}
-
-function exportXLSX(){
-  const scopedItems = currentBrand === 'ALL' ? items : items.filter(it => it.brand === currentBrand);
-  const headers = ['Brand','Territory','Product','Order','Quantity','Size','Availability','Activity','Note','History'];
-  const rows = scopedItems.map(it => [
-    it.brand || '', it.territory || '', it.prodotto || '', it.ordine || '', it.quantity ?? '', it.size || '',
-    it.availability || '', it.activity || '', it.note || '', historyToText(it.history)
-  ]);
-  const wsData = [headers, ...rows];
-  const ws = XLSX.utils.aoa_to_sheet(wsData);
-  ws['!cols'] = [
-    { wch: 14 }, { wch: 14 }, { wch: 26 }, { wch: 14 }, { wch: 10 }, { wch: 10 },
-    { wch: 14 }, { wch: 20 }, { wch: 24 }, { wch: 50 }
-  ];
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'Inventory');
-  const stamp = new Date().toISOString().slice(0,10);
-  const brandLabel = currentBrand === 'ALL' ? 'all-brands' : currentBrand.toLowerCase().replace(/\s+/g,'-');
-  XLSX.writeFile(wb, `props-inventory-${brandLabel}-${stamp}.xlsx`);
-}
-
-el('btnExport').addEventListener('click', ()=>{
-  if(items.length === 0){
-    showToast('There is nothing to export yet.', 'error');
-    return;
-  }
-  if(typeof XLSX === 'undefined'){
-    showToast('Export library failed to load. Check your connection and try again.', 'error');
-    return;
-  }
-  exportXLSX();
-});
-
-updateLockButton();
-loadItems();
-
-el('btnBackups').addEventListener('click', async ()=>{
-  if(!(await requireOwnerAuth())) return;
-  openBackupsDialog();
-});
-
-async function openBackupsDialog(){
-  el('backupDetail').style.display = 'none';
-  el('backupsList').style.display = 'block';
-  el('backupsList').textContent = 'Loading...';
-  el('backupsOverlay').classList.add('open');
-  try{
-    const res = await fetch('/api/inventory?backups=list', { cache: 'no-store' });
-    const data = await res.json();
-    const dates = Array.isArray(data.dates) ? data.dates : [];
-    if(dates.length === 0){
-      el('backupsList').textContent = 'No backups yet. The first automatic backup runs at midnight (UTC).';
-      return;
-    }
-    el('backupsList').innerHTML = dates.map(d => `
-      <button class="secondary" style="display:block;width:100%;text-align:left;margin-bottom:6px;" onclick="openBackupDetail('${d}')">${d}</button>
-    `).join('');
-  }catch(e){
-    el('backupsList').textContent = 'Could not load backups.';
-    console.error(e);
-  }
-}
-
-window.openBackupDetail = async (date) => {
-  el('backupDetailTitle').textContent = date;
-  el('backupsList').style.display = 'none';
-  el('backupDetail').style.display = 'block';
-  el('backupTableBody').innerHTML = '<tr><td style="padding:8px;" colspan="4">Loading...</td></tr>';
-  try{
-    const res = await fetch('/api/inventory?backup=' + encodeURIComponent(date), { cache: 'no-store' });
-    const data = await res.json();
-    const backupItems = data.backup && Array.isArray(data.backup.items) ? data.backup.items : [];
-    if(backupItems.length === 0){
-      el('backupTableBody').innerHTML = '<tr><td style="padding:8px;" colspan="4">Empty backup.</td></tr>';
-      return;
-    }
-    el('backupTableBody').innerHTML = backupItems.map(it => `
-      <tr style="border-bottom:1px dotted var(--line);">
-        <td style="padding:6px 8px;">${escapeHtml(it.territory)||'—'}</td>
-        <td style="padding:6px 8px;">${escapeHtml(it.prodotto)||'—'}</td>
-        <td style="padding:6px 8px;">${escapeHtml(it.availability)||'—'}</td>
-        <td style="padding:6px 8px;">${escapeHtml(it.note)||'—'}</td>
-      </tr>
-    `).join('');
-  }catch(e){
-    el('backupTableBody').innerHTML = '<tr><td style="padding:8px;" colspan="4">Could not load this backup.</td></tr>';
-    console.error(e);
-  }
-};
-
-el('backupBack').addEventListener('click', ()=>{
-  el('backupDetail').style.display = 'none';
-  el('backupsList').style.display = 'block';
-});
-el('backupsClose').addEventListener('click', ()=> el('backupsOverlay').classList.remove('open'));
-</script>
-</body>
-</html>
+  el('f_ordine').value = item ? item.ordine
