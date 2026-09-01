@@ -83,6 +83,28 @@ export default async (req) => {
         }
       }
 
+      if (body.renameBrand && body.renameBrand.from && body.renameBrand.to) {
+        const from = String(body.renameBrand.from);
+        const to = String(body.renameBrand.to);
+
+        await applyBlobUpdate(store, 'brands', (brands) => {
+          const list = Array.isArray(brands) ? brands.slice() : [];
+          const idx = list.findIndex((b) => b.toLowerCase() === from.toLowerCase());
+          if (idx >= 0) list[idx] = to;
+          else if (!list.some((b) => b.toLowerCase() === to.toLowerCase())) list.push(to);
+          return [...new Set(list)];
+        });
+
+        await applyBlobUpdate(store, 'items', (items) => {
+          const next = Array.isArray(items) ? items : [];
+          return next.map((it) =>
+            it.brand && it.brand.toLowerCase() === from.toLowerCase()
+              ? { ...it, brand: to }
+              : it
+          );
+        });
+      }
+
       if (body.migrate) {
         const m = body.migrate;
         await applyBlobUpdate(store, 'items', (items) => {
