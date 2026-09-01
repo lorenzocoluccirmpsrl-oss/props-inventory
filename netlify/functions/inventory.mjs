@@ -1,23 +1,19 @@
 import { getStore } from '@netlify/blobs';
 
-// Reads the current items list, applies `mutate`, and writes it back using an
-// ETag-conditional write. If another request wrote in between, it retries
-// with fresh data instead of silently overwriting the other change.
-async function applyItemsUpdate(store, mutate) {
+async function applyBlobUpdate(store, key, mutate) {
   for (let attempt = 0; attempt < 8; attempt++) {
-    const existing = await store.getWithMetadata('items', { type: 'json', consistency: 'strong' });
-    const currentItems = existing && Array.isArray(existing.data) ? existing.data : [];
-    const nextItems = mutate(currentItems);
+    const existing = await store.getWithMetadata(key, { type: 'json', consistency: 'strong' });
+    const currentValue = existing ? existing.data : null;
+    const nextValue = mutate(currentValue);
 
     const writeOpts = existing && existing.etag ? { onlyIfMatch: existing.etag } : { onlyIfNew: true };
-    const result = await store.setJSON('items', nextItems, writeOpts);
+    const result = await store.setJSON(key, nextValue, writeOpts);
 
     if (!result || result.modified !== false) {
-      return nextItems;
+      return nextValue;
     }
-    // Someone else wrote in between — loop and retry with fresh data.
   }
-  throw new Error('Could not save changes due to concurrent updates. Please try again.');
+  throw new Error(`Could not save changes to "${key}" due to concurrent updates. Please try again.`);
 }
 
 export default async (req) => {
@@ -34,6 +30,32 @@ export default async (req) => {
           headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, max-age=0' }
         });
       }
+
+      if (url.searchParams.get('backups') === 'list') {
+        const backupStore = getStore('props-inventory-backups');
+        const { blobs } = await backupStore.list({ prefix: 'backup-' });
+        const dates = blobs.map((b) => b.key.replace('backup-', '')).sort().reverse();
+        return new Response(JSON.stringify({ dates }), {
+          headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, max-age=0' }
+        });
+      }
+
+      if (url.searchParams.get('brands') === 'list') {
+        const brands = await store.get('brands', { type: 'json', consistency: 'strong' });
+        return new Response(JSON.stringify({ brands: Array.isArray(brands) ? brands : [] }), {
+          headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, max-age=0' }
+        });
+      }
+
+      const backupDate = url.searchParams.get('backup');
+      if (backupDate) {
+        const backupStore = getStore('props-inventory-backups');
+        const backup = await backupStore.get(`backup-${backupDate}`, { type: 'json' });
+        return new Response(JSON.stringify({ backup: backup || null }), {
+          headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, max-age=0' }
+        });
+      }
+
       const data = await store.get('items', { type: 'json', consistency: 'strong' });
       return new Response(JSON.stringify({ items: data || [] }), {
         headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, max-age=0' }
@@ -48,30 +70,44 @@ export default async (req) => {
         return new Response(JSON.stringify({ error: 'Invalid JSON' }), { status: 400 });
       }
 
-      await applyItemsUpdate(store, (items) => {
-        let next = items;
+      if (body.addBrand) {
+        const name = String(body.addBrand).trim();
+        if (name) {
+          await applyBlobUpdate(store, 'brands', (brands) => {
+            const list = Array.isArray(brands) ? brands.slice() : [];
+            if (!list.some((b) => b.toLowerCase() === name.toLowerCase())) {
+              list.push(name);
+            }
+            return list;
+          });
+        }
+      }
 
-        if (body.upsertItem && body.upsertItem.id) {
-          const idx = next.findIndex(it => it.id === body.upsertItem.id);
-          if (idx >= 0) {
-            next = next.slice();
-            next[idx] = body.upsertItem;
-          } else {
-            next = next.concat([body.upsertItem]);
+      if (body.upsertItem || body.deleteItemId || Array.isArray(body.items)) {
+        await applyBlobUpdate(store, 'items', (items) => {
+          let next = Array.isArray(items) ? items : [];
+
+          if (body.upsertItem && body.upsertItem.id) {
+            const idx = next.findIndex(it => it.id === body.upsertItem.id);
+            if (idx >= 0) {
+              next = next.slice();
+              next[idx] = body.upsertItem;
+            } else {
+              next = next.concat([body.upsertItem]);
+            }
           }
-        }
 
-        if (body.deleteItemId) {
-          next = next.filter(it => it.id !== body.deleteItemId);
-        }
+          if (body.deleteItemId) {
+            next = next.filter(it => it.id !== body.deleteItemId);
+          }
 
-        // Backward-compat / bulk replace (used rarely, e.g. full re-sync)
-        if (Array.isArray(body.items)) {
-          next = body.items;
-        }
+          if (Array.isArray(body.items)) {
+            next = body.items;
+          }
 
-        return next;
-      });
+          return next;
+        });
+      }
 
       if (body.photoUpdates && typeof body.photoUpdates === 'object') {
         for (const [id, dataUrl] of Object.entries(body.photoUpdates)) {
