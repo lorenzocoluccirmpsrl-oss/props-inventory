@@ -1,5 +1,8 @@
 import { getStore } from '@netlify/blobs';
 
+// Reads the current value at `key`, applies `mutate`, and writes it back using
+// an ETag-conditional write. If another request wrote in between, it retries
+// with fresh data instead of silently overwriting the other change.
 async function applyBlobUpdate(store, key, mutate) {
   for (let attempt = 0; attempt < 8; attempt++) {
     const existing = await store.getWithMetadata(key, { type: 'json', consistency: 'strong' });
@@ -12,6 +15,7 @@ async function applyBlobUpdate(store, key, mutate) {
     if (!result || result.modified !== false) {
       return nextValue;
     }
+    // Someone else wrote in between — loop and retry with fresh data.
   }
   throw new Error(`Could not save changes to "${key}" due to concurrent updates. Please try again.`);
 }
@@ -43,6 +47,33 @@ export default async (req) => {
       if (url.searchParams.get('brands') === 'list') {
         const brands = await store.get('brands', { type: 'json', consistency: 'strong' });
         return new Response(JSON.stringify({ brands: Array.isArray(brands) ? brands : [] }), {
+          headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, max-age=0' }
+        });
+      }
+
+      const brandForToken = url.searchParams.get('brandToken');
+      if (brandForToken) {
+        let tokens = await store.get('brand-tokens', { type: 'json', consistency: 'strong' });
+        tokens = tokens && typeof tokens === 'object' ? tokens : {};
+        if (!tokens[brandForToken]) {
+          const newToken = crypto.randomUUID().replace(/-/g, '');
+          await applyBlobUpdate(store, 'brand-tokens', (t) => {
+            const obj = t && typeof t === 'object' ? { ...t } : {};
+            if (!obj[brandForToken]) obj[brandForToken] = newToken;
+            return obj;
+          });
+          tokens = await store.get('brand-tokens', { type: 'json', consistency: 'strong' }) || {};
+        }
+        return new Response(JSON.stringify({ token: tokens[brandForToken] }), {
+          headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, max-age=0' }
+        });
+      }
+
+      const tokenToResolve = url.searchParams.get('resolveToken');
+      if (tokenToResolve) {
+        const tokens = (await store.get('brand-tokens', { type: 'json', consistency: 'strong' })) || {};
+        const brand = Object.keys(tokens).find((name) => tokens[name] === tokenToResolve) || null;
+        return new Response(JSON.stringify({ brand }), {
           headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, max-age=0' }
         });
       }
@@ -92,6 +123,7 @@ export default async (req) => {
           const idx = list.findIndex((b) => b.toLowerCase() === from.toLowerCase());
           if (idx >= 0) list[idx] = to;
           else if (!list.some((b) => b.toLowerCase() === to.toLowerCase())) list.push(to);
+          // De-duplicate in case "to" already existed separately.
           return [...new Set(list)];
         });
 
@@ -102,6 +134,15 @@ export default async (req) => {
               ? { ...it, brand: to }
               : it
           );
+        });
+
+        await applyBlobUpdate(store, 'brand-tokens', (tokens) => {
+          const obj = tokens && typeof tokens === 'object' ? { ...tokens } : {};
+          if (obj[from]) {
+            obj[to] = obj[from];
+            delete obj[from];
+          }
+          return obj;
         });
       }
 
@@ -143,6 +184,7 @@ export default async (req) => {
             next = next.filter(it => it.id !== body.deleteItemId);
           }
 
+          // Backward-compat / bulk replace (used rarely, e.g. full re-sync)
           if (Array.isArray(body.items)) {
             next = body.items;
           }
