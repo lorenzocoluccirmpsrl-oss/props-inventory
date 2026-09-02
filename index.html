@@ -74,6 +74,19 @@ header{
 .brand-tab:hover{opacity:0.85;}
 .brand-tab.active{background:var(--ink);color:var(--paper);}
 .brand-tab.add-tab{border-style:dashed;color:var(--ink-soft);background:transparent;font-weight:400;}
+.brand-tab-wrap{
+  display:inline-flex;align-items:center;gap:4px;
+  font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:1px;text-transform:uppercase;
+  padding:8px 8px 8px 14px;border:1.5px solid var(--ink);background:var(--card);color:var(--ink);
+  font-weight:600;
+}
+.brand-tab-wrap.active{background:var(--ink);color:var(--paper);}
+.brand-tab-label{cursor:pointer;}
+.brand-tab-del{
+  background:transparent;border:none;color:inherit;padding:2px;margin:0;font-size:11px;
+  cursor:pointer;display:flex;align-items:center;opacity:0.55;text-transform:none;letter-spacing:0;
+}
+.brand-tab-del:hover{opacity:1;color:var(--red);}
 
 /* TOOLBAR */
 .toolbar{
@@ -686,17 +699,57 @@ function renderBrandTabs(){
     el('brandTabs').innerHTML = `<div class="brand-tab active" style="cursor:default;">${escapeHtml(clientLockedBrand)}</div>`;
     return;
   }
-  const tabsHtml = ['ALL', ...brands].map(b => `
-    <button type="button" class="brand-tab ${currentBrand===b ? 'active':''}" data-brand="${escapeHtml(b)}">${escapeHtml(b)}</button>
-  `).join('') + `<button type="button" class="brand-tab add-tab" id="btnAddBrand">+ Add brand</button>`;
+  const allTab = `<button type="button" class="brand-tab ${currentBrand==='ALL' ? 'active':''}" data-brand="ALL">ALL</button>`;
+  const brandTabs = brands.map(b => `
+    <span class="brand-tab-wrap ${currentBrand===b ? 'active':''}">
+      <span class="brand-tab-label" data-brand="${escapeHtml(b)}">${escapeHtml(b)}</span>
+      <button type="button" class="brand-tab-del" data-brand-del="${escapeHtml(b)}" title="Delete brand" aria-label="Delete ${escapeHtml(b)}"><i class="ti ti-x" aria-hidden="true"></i></button>
+    </span>
+  `).join('');
+  const tabsHtml = allTab + brandTabs + `<button type="button" class="brand-tab add-tab" id="btnAddBrand">+ Add brand</button>`;
   el('brandTabs').innerHTML = tabsHtml;
-  el('brandTabs').querySelectorAll('.brand-tab[data-brand]').forEach(btn => {
-    btn.addEventListener('click', () => {
-      currentBrand = btn.dataset.brand;
+  el('brandTabs').querySelectorAll('[data-brand]').forEach(elm => {
+    elm.addEventListener('click', () => {
+      currentBrand = elm.dataset.brand;
       render();
     });
   });
+  el('brandTabs').querySelectorAll('[data-brand-del]').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      deleteBrandFlow(btn.dataset.brandDel);
+    });
+  });
   el('btnAddBrand').addEventListener('click', openAddBrandDialog);
+}
+
+async function deleteBrandFlow(name){
+  if(!(await requireOwnerAuth())) return;
+  const count = items.filter(it => it.brand === name).length;
+  const message = count > 0
+    ? `The "${name}" brand has ${count} prop${count === 1 ? '' : 's'}. Deleting it will permanently delete ${count === 1 ? 'that prop' : 'all of them'} too. This cannot be undone.`
+    : `Delete the "${name}" brand? This cannot be undone.`;
+  if(!(await askConfirm(message, 'Delete brand'))) return;
+  await deleteBrandRemote(name);
+  brands = brands.filter(b => b !== name);
+  items = items.filter(it => it.brand !== name);
+  if(currentBrand === name) currentBrand = 'ALL';
+  render();
+  showToast('Brand deleted.');
+}
+
+async function deleteBrandRemote(name){
+  try{
+    const res = await fetch('/api/inventory', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ deleteBrand: name })
+    });
+    if(!res.ok) throw new Error('Network error');
+  }catch(e){
+    showToast('Error deleting the brand. Please try again.', 'error');
+    console.error(e);
+  }
 }
 
 let pendingBrandResolve = null;
