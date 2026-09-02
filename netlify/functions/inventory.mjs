@@ -114,6 +114,26 @@ export default async (req) => {
         }
       }
 
+      if (body.deleteBrand) {
+        const name = String(body.deleteBrand);
+
+        await applyBlobUpdate(store, 'brands', (brands) => {
+          const list = Array.isArray(brands) ? brands : [];
+          return list.filter((b) => b !== name);
+        });
+
+        await applyBlobUpdate(store, 'items', (items) => {
+          const next = Array.isArray(items) ? items : [];
+          return next.filter((it) => it.brand !== name);
+        });
+
+        await applyBlobUpdate(store, 'brand-tokens', (tokens) => {
+          const obj = tokens && typeof tokens === 'object' ? { ...tokens } : {};
+          delete obj[name];
+          return obj;
+        });
+      }
+
       if (body.renameBrand && body.renameBrand.from && body.renameBrand.to) {
         const from = String(body.renameBrand.from);
         const to = String(body.renameBrand.to);
@@ -123,7 +143,6 @@ export default async (req) => {
           const idx = list.findIndex((b) => b.toLowerCase() === from.toLowerCase());
           if (idx >= 0) list[idx] = to;
           else if (!list.some((b) => b.toLowerCase() === to.toLowerCase())) list.push(to);
-          // De-duplicate in case "to" already existed separately.
           return [...new Set(list)];
         });
 
