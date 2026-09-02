@@ -266,6 +266,7 @@ button:hover{opacity:0.85;}
     </select>
     <div class="spacer"></div>
     <button class="secondary" id="btnExport" type="button">⬇ Export XLS</button>
+    <button class="secondary" id="btnShare" type="button">🔗 Client link</button>
     <button class="secondary" id="btnBackups" type="button">🗄 Backups</button>
     <button class="secondary" id="btnLock" type="button">🔒 Unlock editing</button>
     <button id="btnNew">+ New prop</button>
@@ -387,6 +388,18 @@ button:hover{opacity:0.85;}
   </div>
 </div>
 
+<div class="overlay" id="shareOverlay">
+  <div class="dialog">
+    <h4>Client link</h4>
+    <p>Share this link with a client for the <strong id="shareBrandName"></strong> brand. Anyone with this link can only see that brand — no other tabs, no way to switch.</p>
+    <input type="text" id="shareLinkInput" readonly>
+    <div class="actions">
+      <button class="secondary" id="shareClose">Close</button>
+      <button id="shareCopy">Copy link</button>
+    </div>
+  </div>
+</div>
+
 <div class="overlay" id="backupsOverlay">
   <div class="dialog" style="max-width:560px;">
     <h4>Backups</h4>
@@ -427,6 +440,7 @@ let ownerUnlocked = false;
 let items = [];
 let brands = [];
 let currentBrand = 'ALL';
+let clientLockedBrand = null;
 let editingId = null;
 let currentPhoto = null;
 let currentPhotoFull = null;
@@ -522,6 +536,28 @@ el('btnLock').addEventListener('click', async ()=>{
 });
 
 async function loadItems(){
+  const tParam = new URLSearchParams(location.search).get('t');
+  if(tParam){
+    try{
+      const resT = await fetch('/api/inventory?resolveToken=' + encodeURIComponent(tParam), { cache: 'no-store' });
+      const dataT = await resT.json();
+      if(dataT.brand){
+        clientLockedBrand = dataT.brand;
+        currentBrand = dataT.brand;
+      }
+    }catch(e){
+      console.error(e);
+    }
+    if(!clientLockedBrand){
+      el('content').classList.remove('loading');
+      el('content').innerHTML = `<div class="empty"><b>Link not valid</b>This link is invalid or has expired. Please ask for a new one.</div>`;
+      el('brandTabs').style.display = 'none';
+      document.querySelector('.toolbar').style.display = 'none';
+      return;
+    }
+    el('btnBackups').style.display = 'none';
+    el('btnShare').style.display = 'none';
+  }
   try{
     const res = await fetch('/api/inventory', { cache: 'no-store' });
     if(!res.ok) throw new Error('Network error');
@@ -540,37 +576,41 @@ async function loadItems(){
     console.error(e);
   }
 
-  const needsAvailabilityMigration = items.some(it =>
-    ['Disponibile','Non disponibile','In uso','Esaurito'].includes(it.availability)
-  );
-  const needsBrandMigration = items.some(it => !it.brand);
+  if(!clientLockedBrand){
+    const needsAvailabilityMigration = items.some(it =>
+      ['Disponibile','Non disponibile','In uso','Esaurito'].includes(it.availability)
+    );
+    const needsBrandMigration = items.some(it => !it.brand);
 
-  if(needsAvailabilityMigration || needsBrandMigration){
-    if(needsBrandMigration && !brands.some(b => b.toLowerCase() === 'tnf emea')){
-      await addBrandRemote('TNF EMEA');
-      brands.push('TNF EMEA');
+    if(needsAvailabilityMigration || needsBrandMigration){
+      if(needsBrandMigration && !brands.some(b => b.toLowerCase() === 'tnf emea')){
+        await addBrandRemote('TNF EMEA');
+        brands.push('TNF EMEA');
+      }
+      await migrateRemote({
+        availability: needsAvailabilityMigration,
+        defaultBrand: needsBrandMigration ? 'TNF EMEA' : null
+      });
+      // Re-fetch once, since the migration happened entirely server-side.
+      try{
+        const res3 = await fetch('/api/inventory', { cache: 'no-store' });
+        const data3 = await res3.json();
+        items = Array.isArray(data3.items) ? data3.items : items;
+      }catch(e){
+        console.error(e);
+      }
     }
-    await migrateRemote({
-      availability: needsAvailabilityMigration,
-      defaultBrand: needsBrandMigration ? 'TNF EMEA' : null
-    });
-    try{
-      const res3 = await fetch('/api/inventory', { cache: 'no-store' });
-      const data3 = await res3.json();
-      items = Array.isArray(data3.items) ? data3.items : items;
-    }catch(e){
-      console.error(e);
+
+    // One-time cleanup: rename the legacy default brand "Main" to "TNF EMEA".
+    if(brands.some(b => b.toLowerCase() === 'main') && !brands.some(b => b.toLowerCase() === 'tnf emea')){
+      await renameBrandRemote('Main', 'TNF EMEA');
+      brands = brands.map(b => b.toLowerCase() === 'main' ? 'TNF EMEA' : b);
+      items = items.map(it => (it.brand && it.brand.toLowerCase() === 'main') ? { ...it, brand: 'TNF EMEA' } : it);
     }
-  }
 
-  if(brands.some(b => b.toLowerCase() === 'main') && !brands.some(b => b.toLowerCase() === 'tnf emea')){
-    await renameBrandRemote('Main', 'TNF EMEA');
-    brands = brands.map(b => b.toLowerCase() === 'main' ? 'TNF EMEA' : b);
-    items = items.map(it => (it.brand && it.brand.toLowerCase() === 'main') ? { ...it, brand: 'TNF EMEA' } : it);
-  }
-
-  if(currentBrand !== 'ALL' && !brands.includes(currentBrand)){
-    currentBrand = 'ALL';
+    if(currentBrand !== 'ALL' && !brands.includes(currentBrand)){
+      currentBrand = 'ALL';
+    }
   }
 
   render();
@@ -619,6 +659,10 @@ async function addBrandRemote(name){
 }
 
 function renderBrandTabs(){
+  if(clientLockedBrand){
+    el('brandTabs').innerHTML = `<div class="brand-tab active" style="cursor:default;">${escapeHtml(clientLockedBrand)}</div>`;
+    return;
+  }
   const tabsHtml = ['ALL', ...brands].map(b => `
     <button type="button" class="brand-tab ${currentBrand===b ? 'active':''}" data-brand="${escapeHtml(b)}">${escapeHtml(b)}</button>
   `).join('') + `<button type="button" class="brand-tab add-tab" id="btnAddBrand">+ Add brand</button>`;
@@ -1076,6 +1120,37 @@ el('btnExport').addEventListener('click', ()=>{
 
 updateLockButton();
 loadItems();
+
+el('btnShare').addEventListener('click', async ()=>{
+  if(clientLockedBrand) return;
+  if(currentBrand === 'ALL'){
+    showToast('Select a specific brand tab first, then generate its client link.', 'error');
+    return;
+  }
+  if(!(await requireAuth())) return;
+  try{
+    const res = await fetch('/api/inventory?brandToken=' + encodeURIComponent(currentBrand), { cache: 'no-store' });
+    const data = await res.json();
+    if(!data.token) throw new Error('No token returned');
+    const link = `${location.origin}${location.pathname}?t=${data.token}`;
+    el('shareBrandName').textContent = currentBrand;
+    el('shareLinkInput').value = link;
+    el('shareOverlay').classList.add('open');
+  }catch(e){
+    showToast('Could not generate the client link. Please try again.', 'error');
+    console.error(e);
+  }
+});
+el('shareClose').addEventListener('click', ()=> el('shareOverlay').classList.remove('open'));
+el('shareCopy').addEventListener('click', async ()=>{
+  try{
+    await navigator.clipboard.writeText(el('shareLinkInput').value);
+    showToast('Link copied.');
+  }catch(e){
+    el('shareLinkInput').select();
+    showToast('Select and copy the link manually (⌘/Ctrl+C).', 'error');
+  }
+});
 
 el('btnBackups').addEventListener('click', async ()=>{
   if(!(await requireOwnerAuth())) return;
