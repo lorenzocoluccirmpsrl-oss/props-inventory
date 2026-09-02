@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <title>Props Inventory</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/tabler-icons/3.46.0/tabler-icons.min.css">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
@@ -95,6 +96,21 @@ button{
 }
 button.secondary{background:transparent;color:var(--ink);}
 button.ghost{background:transparent;border:none;color:var(--ink-soft);text-transform:none;letter-spacing:0;padding:4px 6px;}
+button i.ti{font-size:14px;margin-right:6px;vertical-align:-2px;}
+.more-wrap{position:relative;}
+.more-menu{
+  display:none;position:absolute;top:calc(100% + 6px);right:0;
+  background:var(--card);border:1.5px solid var(--ink);min-width:190px;z-index:20;
+}
+.more-menu.open{display:block;}
+.more-menu button{
+  display:flex;align-items:center;width:100%;background:transparent;color:var(--ink);
+  border:none;border-bottom:1px dotted var(--line);text-transform:none;letter-spacing:0;
+  font-weight:400;padding:10px 14px;font-size:12.5px;text-align:left;
+}
+.more-menu button:last-child{border-bottom:none;}
+.more-menu button:hover{background:var(--paper-dark);}
+.more-menu button i.ti{font-size:15px;}
 button:hover{opacity:0.85;}
 
 /* FORM PANEL (modal) */
@@ -265,11 +281,16 @@ button:hover{opacity:0.85;}
       <option>MISSING</option>
     </select>
     <div class="spacer"></div>
-    <button class="secondary" id="btnExport" type="button">⬇ Export XLS</button>
-    <button class="secondary" id="btnShare" type="button">🔗 Client link</button>
-    <button class="secondary" id="btnBackups" type="button">🗄 Backups</button>
-    <button class="secondary" id="btnLock" type="button">🔒 Unlock editing</button>
-    <button id="btnNew">+ New prop</button>
+    <div class="more-wrap">
+      <button class="secondary" id="btnMore" type="button"><i class="ti ti-dots" aria-hidden="true"></i>More</button>
+      <div class="more-menu" id="moreMenu">
+        <button id="btnExport" type="button"><i class="ti ti-download" aria-hidden="true"></i>Export XLS</button>
+        <button id="btnShare" type="button"><i class="ti ti-link" aria-hidden="true"></i>Client link</button>
+        <button id="btnBackups" type="button"><i class="ti ti-database" aria-hidden="true"></i>Backups</button>
+      </div>
+    </div>
+    <button class="secondary" id="btnLock" type="button"><i class="ti ti-lock" aria-hidden="true"></i><span id="btnLockText">Unlock editing</span></button>
+    <button id="btnNew"><i class="ti ti-plus" aria-hidden="true"></i>New prop</button>
   </div>
 
   <div id="content" class="loading">Loading inventory...</div>
@@ -450,7 +471,9 @@ const el = id => document.getElementById(id);
 
 function updateLockButton(){
   const btn = el('btnLock');
-  btn.textContent = unlocked ? '🔓 Editing unlocked' : '🔒 Unlock editing';
+  const icon = btn.querySelector('i.ti');
+  el('btnLockText').textContent = unlocked ? 'Editing unlocked' : 'Unlock editing';
+  icon.className = 'ti ' + (unlocked ? 'ti-lock-open' : 'ti-lock');
 }
 
 function showToast(message, type){
@@ -1116,6 +1139,17 @@ el('btnExport').addEventListener('click', ()=>{
     return;
   }
   exportXLSX();
+});
+
+el('btnMore').addEventListener('click', (e)=>{
+  e.stopPropagation();
+  el('moreMenu').classList.toggle('open');
+});
+document.addEventListener('click', (e)=>{
+  if(!e.target.closest('.more-wrap')) el('moreMenu').classList.remove('open');
+});
+el('moreMenu').querySelectorAll('button').forEach(btn=>{
+  btn.addEventListener('click', ()=> el('moreMenu').classList.remove('open'));
 });
 
 updateLockButton();
